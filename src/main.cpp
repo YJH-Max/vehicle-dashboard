@@ -1,14 +1,22 @@
-// 第2步：uWebSockets 版 —— 静态页 + REST + WebSocket 推送(20Hz)
+// 第4步：数据源 = SocketCAN(--can vcan0) 或 内部模拟(缺省兜底) —— uWS 静态页 + REST + WS推送(20Hz)
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unistd.h>
+
+#include <linux/can.h>        // SocketCAN：内核 CAN 总线原生接口
+#include <linux/can/raw.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 
 #include <App.h>              // uWebSockets
 #include "json.hpp"
@@ -61,6 +69,60 @@ static json latestJson(DataPool& pool) {
             {"temp", snap.latest.temp}};
 }
 
+// ================ 第4步新增：CAN 数据源 ================
+// vcan0 收 0x101(车速)/0x102(水温) → 小端解包 → DataPool
+// 返回 false = 总线不可用(调用方回退模拟源)；返回 true = 正常运行过
+static bool canSourceThread(DataPool& pool, const char* iface,
+                            std::atomic<bool>& running) {
+    int s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+    if (s < 0) { std::perror("[can] socket"); return false; }
+
+    ifreq ifr{};
+    std::strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
+    if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) {
+        std::fprintf(stderr, "[can] 接口 %s 不存在（先跑 scripts/setup_vcan.sh）\n", iface);
+        return false;
+    }
+
+    sockaddr_can addr{};
+    addr.can_family  = AF_CAN;
+    addr.can_ifindex = ifr.ifr_ifindex;
+    if (bind(s, (sockaddr*)&addr, sizeof(addr)) < 0) {
+        std::perror("[can] bind"); return false;
+    }
+
+    // 内核层过滤：只放行这两个 ID，其余报文根本不进用户态（省 CPU）
+    can_filter filt[2] = {{0x101, CAN_SFF_MASK}, {0x102, CAN_SFF_MASK}};
+    setsockopt(s, SOL_CAN_RAW, CAN_RAW_FILTER, filt, sizeof(filt));
+
+    std::printf("[can] 数据源: %s (0x101 车速 / 0x102 水温)\n", iface);
+    std::fflush(stdout);
+
+    can_frame f;
+    double lastSpeed = 0.0, lastTemp = 70.0;   // 两个 ID 分帧到达，各持最新值
+    while (running.load(std::memory_order_relaxed)) {
+        const ssize_t n = read(s, &f, sizeof(f));
+        if (n < (ssize_t)sizeof(can_frame)) continue;
+
+        // ★ timestamp 口径 = epoch 毫秒。若启动后前端曲线时间轴异常，
+        //   说明 data_generator.hpp 用的是别的口径——把它的 timestamp 那行贴给我
+        const double ts = std::chrono::duration<double, std::milli>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        const std::uint16_t raw =
+            (std::uint16_t)f.data[0] | (std::uint16_t(f.data[1]) << 8);  // 小端
+
+        switch (f.can_id & CAN_SFF_MASK) {
+            case 0x101: lastSpeed = raw / 10.0; break;   // 0.1 km/h 分辨率
+            case 0x102: lastTemp  = raw / 10.0; break;   // 0.1 °C  分辨率
+        }
+        pool.produce({ts, lastSpeed, lastTemp});         // 每帧产出一条 → ~550 条/秒
+    }
+    close(s);
+    return true;
+}
+// ======================================================
+
 // ---------------- 正常模式 ----------------
 int main(int argc, char* argv[]) {
     if (argc > 1 && std::string(argv[1]) == "--bench") return runBench();
@@ -68,8 +130,17 @@ int main(int argc, char* argv[]) {
     DataPool pool;
     std::atomic<bool> running{true};
 
-    // 生产者：1000 帧/秒（不变）
-    std::thread producer(dataGenerator, std::ref(pool), 1000, std::ref(running));
+    // ================ 第4步修改：数据源分流 ================
+    // ./dashboard --can vcan0  → SocketCAN 总线源
+    // ./dashboard              → 内部模拟 1000Hz（零配置兜底；总线故障也自动回退到这）
+    std::thread dataThread([&] {
+        if (argc > 2 && std::string(argv[1]) == "--can") {
+            if (canSourceThread(pool, argv[2], running)) return;
+            std::fprintf(stderr, "[can] 启动失败，自动回退到内部模拟源\n");
+        }
+        dataGenerator(pool, 1000, running);
+    });
+    // ======================================================
 
     struct PerSocketData {};
     uWS::App app;
@@ -139,7 +210,7 @@ int main(int argc, char* argv[]) {
     app.run();   // 阻塞主线程
 
     running.store(false);
-    producer.join();
+    dataThread.join();
     consumer.join();
     return 0;
 }
