@@ -1,30 +1,16 @@
-/*#include <iostream>
-#include "httplib.h"
-
-int main(){
-    httplib::Server svr;
-
-    svr.Get("/api/ping", [](const httplib::Request&, httplib::Response& res) {
-        res.set_content(R"({"status":"ok","version":"v0.1"})", "\n","application/json");
-    });
-
-    svr.set_mount_point("/", "./www");
-
-    std::cout << "Server started at http://localhost:8080" << std::endl;
-    svr.listen("0.0.0.0", 8080);
-    return 0;
-}
-*/
+// 第2步：uWebSockets 版 —— 静态页 + REST + WebSocket 推送(20Hz)
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <functional>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <thread>
 
-#include "httplib.h"
+#include <App.h>              // uWebSockets
 #include "json.hpp"
 
 #include "data_pool.hpp"
@@ -32,28 +18,23 @@ int main(){
 
 using json = nlohmann::json;
 
-// ---------------- 基准模式：./dashboard --bench ----------------
+// ---------------- 基准模式：./dashboard --bench（原样保留） ----------------
 static int runBench() {
     DataPool pool;
     std::atomic<bool> running{true};
     constexpr auto kDuration = std::chrono::seconds(5);
 
     std::thread consumer([&] {
-        while (running.load(std::memory_order_relaxed)) {
-            pool.drain();
-        }
+        while (running.load(std::memory_order_relaxed)) pool.drain();
     });
 
     const auto start = std::chrono::steady_clock::now();
     std::uint64_t pushed = 0;
-    DataPoint d{0.0, 60.0, 50.0};  // 基准模式只测队列，数据内容无所谓
+    DataPoint d{0.0, 60.0, 50.0};
 
     while (std::chrono::steady_clock::now() - start < kDuration) {
-        if (pool.produce(d)) {
-            ++pushed;
-        } else {
-            std::this_thread::yield();  // 缓冲区满：让出 CPU 给消费者
-        }
+        if (pool.produce(d)) ++pushed;
+        else std::this_thread::yield();
     }
 
     running.store(false, std::memory_order_relaxed);
@@ -67,61 +48,95 @@ static int runBench() {
     return 0;
 }
 
-// ---------------- 正常模式：数据管线 + HTTP 服务 ----------------
+static std::string readFile(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream ss; ss << in.rdbuf();
+    return ss.str();
+}
+
+static json latestJson(DataPool& pool) {
+    auto snap = pool.snapshot();
+    return {{"timestamp", snap.latest.timestamp},
+            {"speed", snap.latest.speed},
+            {"temp", snap.latest.temp}};
+}
+
+// ---------------- 正常模式 ----------------
 int main(int argc, char* argv[]) {
-    if (argc > 1 && std::string(argv[1]) == "--bench") {
-        return runBench();
-    }
+    if (argc > 1 && std::string(argv[1]) == "--bench") return runBench();
 
     DataPool pool;
     std::atomic<bool> running{true};
 
-    // 生产者：1000 帧/秒
+    // 生产者：1000 帧/秒（不变）
     std::thread producer(dataGenerator, std::ref(pool), 1000, std::ref(running));
 
-    // 消费者：持续抽干环形缓冲区 + 每 1 秒打印吞吐量
+    struct PerSocketData {};
+    uWS::App app;
+    uWS::Loop* loop = uWS::Loop::get();   // 主线程 = 事件循环线程
+
+    // REST 接口（语义与 httplib 版一致）
+    app.get("/api/latest", [&pool](auto* res, auto* /*req*/) {
+        res->writeHeader("Content-Type", "application/json")->end(latestJson(pool).dump());
+    });
+
+    app.get("/api/history", [&pool](auto* res, auto* /*req*/) {
+        auto snap = pool.snapshot();
+        json j = json::array();
+        for (const auto& d : snap.history)
+            j.push_back({{"timestamp", d.timestamp}, {"speed", d.speed}, {"temp", d.temp}});
+        res->writeHeader("Content-Type", "application/json")->end(j.dump());
+    });
+
+    // 静态页：uWS 没有挂载目录功能，启动时读进内存
+    const std::string indexHtml = readFile("./www/index.html");
+    app.get("/", [&indexHtml](auto* res, auto* /*req*/) {
+        res->writeHeader("Content-Type", "text/html; charset=utf-8")->end(indexHtml);
+    });
+
+    // WebSocket：/ws，客户端订阅 "telemetry" 主题
+    app.ws<PerSocketData>("/ws", {
+        .compression = uWS::SHARED_COMPRESSOR,
+        .open        = [](auto* ws) { ws->subscribe("telemetry"); },
+        .message     = [](auto*, std::string_view, uWS::OpCode) {},  // 前端只收不发
+        .close       = [](auto*, int, std::string_view) {}
+    });
+
+    // 消费者：抽干缓冲区 + 每 50ms(20Hz) 广播一次 + 每秒打印吞吐量
     std::thread consumer([&] {
         auto last_report = std::chrono::steady_clock::now();
+        auto next_pub    = last_report + std::chrono::milliseconds(50);
         std::uint64_t last_total = 0;
+
         while (running.load(std::memory_order_relaxed)) {
             pool.drain();
-            auto now = std::chrono::steady_clock::now();
+            const auto now = std::chrono::steady_clock::now();
+
+            if (now >= next_pub) {
+                next_pub += std::chrono::milliseconds(50);
+                loop->defer([&app, &pool] {   // 切回事件循环线程再广播（线程安全）
+                    app.publish("telemetry", latestJson(pool).dump(), uWS::OpCode::TEXT);
+                });
+            }
+
             if (std::chrono::duration<double>(now - last_report).count() >= 1.0) {
                 last_report = now;
                 const std::uint64_t total = pool.totalConsumed();
-                std::printf("[吞吐量] %llu 条/秒 | 累计 %llu 条\n",
+                std::printf("[吞吐量] %llu 条/秒 | 累计 %llu 条 | WS推送 20Hz\n",
                             (unsigned long long)(total - last_total),
                             (unsigned long long)total);
+                std::fflush(stdout);
                 last_total = total;
             }
         }
     });
 
-    httplib::Server svr;
-
-    svr.Get("/api/latest", [&](const httplib::Request&, httplib::Response& res) {
-        auto snap = pool.snapshot();
-        json j = {{"timestamp", snap.latest.timestamp},
-                  {"speed", snap.latest.speed},
-                  {"temp", snap.latest.temp}};
-        res.set_content(j.dump(), "application/json");
+    app.listen(8080, [](auto* token) {
+        if (token) std::cout << "Server started: http://localhost:8080 (WS: /ws)\n";
+        else { std::cerr << "8080 被占用，先 pkill dashboard\n"; std::exit(1); }
     });
 
-    svr.Get("/api/history", [&](const httplib::Request&, httplib::Response& res) {
-        auto snap = pool.snapshot();
-        json j = json::array();
-        for (const auto& d : snap.history) {
-            j.push_back({{"timestamp", d.timestamp},
-                         {"speed", d.speed},
-                         {"temp", d.temp}});
-        }
-        res.set_content(j.dump(), "application/json");
-    });
-
-    svr.set_mount_point("/", "./www");
-
-    std::cout << "Server started at http://localhost:8080" << std::endl;
-    svr.listen("0.0.0.0", 8080);
+    app.run();   // 阻塞主线程
 
     running.store(false);
     producer.join();

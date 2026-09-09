@@ -161,154 +161,81 @@
     </div>
 
     <script>
-        // ========== 初始化 ECharts ==========
-        const chart = echarts.init(document.getElementById('chart'));
+    // ========== 初始化 ECharts ==========
+    const chart = echarts.init(document.getElementById('chart'));
+    const option = {
+        tooltip: { trigger: 'axis', backgroundColor: 'rgba(20,30,50,0.9)', borderColor: '#2a3a5a', textStyle: { color: '#e0e6f0' } },
+        legend: { data: ['车速 (km/h)', '温度 (°C)'], textStyle: { color: '#8899bb' }, top: 0, right: 10 },
+        grid: { left: 50, right: 30, bottom: 30, top: 40 },
+        xAxis: { type: 'category', data: [], axisLine: { lineStyle: { color: '#2a3a5a' } }, axisLabel: { color: '#667799', fontSize: 11 }, splitLine: { show: false } },
+        yAxis: [{ type: 'value', name: '车速 (km/h)', min: 0, max: 150, axisLabel: { color: '#667799' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }, axisLine: { show: false } },
+                { type: 'value', name: '温度 (°C)', min: 0, max: 100, axisLabel: { color: '#667799' }, splitLine: { show: false }, axisLine: { show: false } }],
+        series: [{ name: '车速 (km/h)', type: 'line', data: [], smooth: true, symbol: 'none', lineStyle: { color: '#4fc3f7', width: 2 }, areaStyle: { color: 'rgba(79,195,247,0.15)' }, yAxisIndex: 0 },
+                 { name: '温度 (°C)', type: 'line', data: [], smooth: true, symbol: 'none', lineStyle: { color: '#ff8a65', width: 2 }, areaStyle: { color: 'rgba(255,138,101,0.12)' }, yAxisIndex: 1 }]
+    };
+    chart.setOption(option);
 
-        // 图表配置（深色主题适配）
-        const option = {
-            tooltip: {
-                trigger: 'axis',
-                backgroundColor: 'rgba(20,30,50,0.9)',
-                borderColor: '#2a3a5a',
-                textStyle: { color: '#e0e6f0' }
-            },
-            legend: {
-                data: ['车速 (km/h)', '温度 (°C)'],
-                textStyle: { color: '#8899bb' },
-                top: 0,
-                right: 10
-            },
-            grid: {
-                left: 50,
-                right: 30,
-                bottom: 30,
-                top: 40
-            },
-            xAxis: {
-                type: 'category',
-                data: [],
-                axisLine: { lineStyle: { color: '#2a3a5a' } },
-                axisLabel: { color: '#667799', fontSize: 11 },
-                splitLine: { show: false }
-            },
-            yAxis: [{
-                type: 'value',
-                name: '车速 (km/h)',
-                min: 0,
-                max: 150,
-                axisLabel: { color: '#667799' },
-                splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
-                axisLine: { show: false }
-            }, {
-                type: 'value',
-                name: '温度 (°C)',
-                min: 0,
-                max: 100,
-                axisLabel: { color: '#667799' },
-                splitLine: { show: false },
-                axisLine: { show: false }
-            }],
-            series: [{
-                name: '车速 (km/h)',
-                type: 'line',
-                data: [],
-                smooth: true,
-                symbol: 'none',
-                lineStyle: { color: '#4fc3f7', width: 2 },
-                areaStyle: {
-                    color: 'rgba(79, 195, 247, 0.15)'
-                },
-                yAxisIndex: 0
-            }, {
-                name: '温度 (°C)',
-                type: 'line',
-                data: [],
-                smooth: true,
-                symbol: 'none',
-                lineStyle: { color: '#ff8a65', width: 2 },
-                areaStyle: {
-                    color: 'rgba(255, 138, 101, 0.12)'
-                },
-                yAxisIndex: 1
-            }]
-        };
+    function formatTime(ts) {
+        if (!ts || ts <= 0) return '--';
+        return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour12: false });
+    }
 
-        chart.setOption(option);
+    // ========== 渲染逻辑（初始加载与 WS 推送共用）==========
+    const MAX_POINTS = 100;
+    let points = [];   // 前端镜像 RingBuffer
 
-        // ========== 工具函数：格式化时间 ==========
-        function formatTime(ts) {
-            if (!ts || ts <= 0) return '--';
-            const d = new Date(ts * 1000);
-            return d.toLocaleTimeString('zh-CN', { hour12: false });
+    function updateUI(latest, pts) {
+        document.getElementById('speedDisplay').innerText =
+            latest.speed !== undefined && latest.speed !== null ? latest.speed.toFixed(1) : '--';
+        document.getElementById('tempDisplay').innerText =
+            latest.temp !== undefined && latest.temp !== null ? latest.temp.toFixed(1) : '--';
+        if (latest.timestamp)
+            document.getElementById('updateTime').innerText = '更新于: ' + formatTime(latest.timestamp);
+
+        const speedData = [], tempData = [], timeLabels = [];
+        for (let i = 0; i < pts.length; i++) {
+            timeLabels.push((i + 1).toString());
+            speedData.push(pts[i].speed || 0);
+            tempData.push(pts[i].temp || 0);
         }
+        chart.setOption({ xAxis: { data: timeLabels }, series: [{ data: speedData }, { data: tempData }] });
+    }
 
-        // ========== 核心刷新函数 ==========
-        async function refreshDashboard() {
-            const start = performance.now();
-
-            try {
-                // 1. 获取最新数据（用于大数字显示）
-                const latestRes = await fetch('/api/latest');
-                const latest = await latestRes.json();
-
-                // 更新速度、温度
-                document.getElementById('speedDisplay').innerText =
-                    latest.speed !== undefined && latest.speed !== null ? latest.speed.toFixed(1) : '--';
-                document.getElementById('tempDisplay').innerText =
-                    latest.temp !== undefined && latest.temp !== null ? latest.temp.toFixed(1) : '--';
-
-                // 更新时间戳
-                if (latest.timestamp) {
-                    document.getElementById('updateTime').innerText = '更新于: ' + formatTime(latest.timestamp);
-                }
-
-                // 2. 获取历史数据（用于曲线图）
-                const historyRes = await fetch('/api/history');
-                const historyData = await historyRes.json();
-
-                // 准备图表数据
-                const speedData = [];
-                const tempData = [];
-                const timeLabels = [];
-
-                // 提取最近的数据（最多 100 个点，按时间顺序）
-                const points = historyData.length > 0 ? historyData : [];
-                for (let i = 0; i < points.length; i++) {
-                    const item = points[i];
-                    // 用索引作为 x 轴标签（更清晰），也可以显示具体时间
-                    timeLabels.push((i + 1).toString());
-                    speedData.push(item.speed || 0);
-                    tempData.push(item.temp || 0);
-                }
-
-                // 更新 ECharts
-                chart.setOption({
-                    xAxis: { data: timeLabels },
-                    series: [{
-                        data: speedData
-                    }, {
-                        data: tempData
-                    }]
-                });
-
-            } catch (e) {
-                console.error('❌ 数据拉取失败:', e);
-                // 不显示错误提示，避免闪烁
-            }
-
-            // 计算延迟
-            const end = performance.now();
-            const latency = (end - start).toFixed(0);
+    // 真实延迟 = 本机时钟 - 服务端时间戳
+    function showLatency(p) {
+        if (p.timestamp) {
+            const latency = Math.max(0, Math.round(Date.now() - p.timestamp * 1000));
             document.getElementById('latencyDisplay').innerText = latency;
         }
+    }
 
-        // ========== 启动定时刷新 ==========
-        // 首次立即执行
-        refreshDashboard();
+    // ========== 启动：拉一次历史垫底 → 切换到 WS 推送 ==========
+    async function boot() {
+        try {
+            const r = await fetch('/api/history');
+            points = await r.json();
+            if (points.length) updateUI(points[points.length - 1], points);
+        } catch (e) { console.warn('历史加载失败，仅靠 WS 推送', e); }
+        connectWS();
+    }
 
-        // 每 500ms 刷新一次（既保证实时性，又不给后端太大压力）
-        setInterval(refreshDashboard, 500);
-    </script>
+    function connectWS() {
+        const ws = new WebSocket(`ws://${location.host}/ws`);   // 后端若是 .ws("/*") 就把 /ws 去掉
+
+        ws.onopen = () => console.log('[WS] 已连接');
+        ws.onmessage = (e) => {
+            const p = JSON.parse(e.data);
+            points.push(p);
+            if (points.length > MAX_POINTS) points.shift();
+            updateUI(p, points);
+            showLatency(p);
+        };
+        ws.onclose = () => { console.warn('[WS] 断开，1s 后重连'); setTimeout(connectWS, 1000); };
+        ws.onerror = () => ws.close();
+    }
+
+    boot();
+</script>
 
 </body>
 </html>
