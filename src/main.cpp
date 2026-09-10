@@ -144,7 +144,6 @@ int main(int argc, char* argv[]) {
     uWS::App app;
     uWS::Loop* loop = uWS::Loop::get();   // 主线程 = 事件循环线程
 
-    // REST 接口（语义与 httplib 版一致）
     app.get("/api/latest", [&pool](auto* res, auto* /*req*/) {
         res->writeHeader("Content-Type", "application/json")->end(latestJson(pool).dump());
     });

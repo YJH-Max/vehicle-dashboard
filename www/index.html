@@ -177,7 +177,7 @@
 
     function formatTime(ts) {
         if (!ts || ts <= 0) return '--';
-        return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour12: false });
+        return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
     }
 
     // ========== 渲染逻辑（初始加载与 WS 推送共用）==========
@@ -204,7 +204,7 @@
     // 真实延迟 = 本机时钟 - 服务端时间戳
     function showLatency(p) {
         if (p.timestamp) {
-            const latency = Math.max(0, Math.round(Date.now() - p.timestamp * 1000));
+            const latency = Math.max(0, Math.round(Date.now() - p.timestamp));
             document.getElementById('latencyDisplay').innerText = latency;
         }
     }
