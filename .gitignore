@@ -1,8 +1,12 @@
+# 编译产物
 build/
 *.o
-*.so
-*.a
-dashboard
-test_ring
+*.bak
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# IDE
 .vscode/
 .idea/

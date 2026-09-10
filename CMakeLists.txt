@@ -20,3 +20,5 @@ target_link_libraries(test_ring pthread)
 
 enable_testing()
 add_test(NAME ring_spsc_test COMMAND test_ring)
+
+add_executable(can_producer src/can_producer.cpp)
