@@ -26,7 +26,7 @@ void dataGenerator(DataPool& pool, int rate_hz, const std::atomic<bool>& running
         temp += (2.5 * std::sin(t * 0.15) + jitter(rng) * 0.8) * dt;
         temp = std::clamp(temp, 20.0, 95.0);
 
-        const double ts = std::chrono::duration<double>(
+        const double ts = std::chrono::duration<double, std::milli>(
             std::chrono::system_clock::now().time_since_epoch()).count();
 
         pool.produce({ts, speed, temp});  // 缓冲区满则丢帧（1000Hz 下不会发生）

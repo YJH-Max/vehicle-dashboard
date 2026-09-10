@@ -104,8 +104,6 @@ static bool canSourceThread(DataPool& pool, const char* iface,
         const ssize_t n = read(s, &f, sizeof(f));
         if (n < (ssize_t)sizeof(can_frame)) continue;
 
-        // ★ timestamp 口径 = epoch 毫秒。若启动后前端曲线时间轴异常，
-        //   说明 data_generator.hpp 用的是别的口径——把它的 timestamp 那行贴给我
         const double ts = std::chrono::duration<double, std::milli>(
             std::chrono::system_clock::now().time_since_epoch()).count();
 

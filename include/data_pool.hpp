@@ -9,7 +9,7 @@
 
 // 单帧车载数据
 struct DataPoint {
-    double timestamp;  // Unix 秒
+    double timestamp;  // epoch 毫秒
     double speed;      // km/h
     double temp;       // °C
 };
@@ -74,7 +74,7 @@ private:
     DataPoint latest_{};
     size_t history_cap_;
 
-    double sample_interval_ = 0.1;  // 100ms 采一个显示点
+    double sample_interval_ = 100.0;  // 100ms 采一个显示点 (毫秒)
     double last_sample_ts_ = 0.0;
 
     std::atomic<std::uint64_t> total_consumed_{0};
