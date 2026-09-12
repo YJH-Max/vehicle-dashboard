@@ -27,8 +27,8 @@ jobs:
       - name: 编译安装 uWebSockets
         run: |
           git clone --depth 1 --recurse-submodules \
-            https://github.com/uNetworking/uWebSockets.git /tmp/uws
-          cd /tmp/uws
+            https://github.com/uNetworking/uWebSockets.git $HOME/uWebSockets
+          cd $HOME/uWebSockets
           make
           sudo make install
           cd uSockets
