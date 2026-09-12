@@ -2,6 +2,17 @@
 
 从内核 CAN 总线到浏览器曲线的完整实时链路：**SocketCAN 收帧 → 无锁 SPSC 队列 → uWebSockets 推送 → ECharts 可视化**。
 
+
+## 一键安装依赖
+
+    ./scripts/install_deps.sh
+
+## Docker 构建
+
+    docker build -t vehicle-dashboard .
+    docker run --rm -p 8080:8080 vehicle-dashboard /app/dashboard
+
+
 ## 架构
 
     ┌──────────────┐  CAN 2.0 帧   ┌─────────────────────────┐

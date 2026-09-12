@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# 一键安装项目依赖。假设 Ubuntu 22.04+。
+# 用法: ./scripts/install_deps.sh
+set -e
+
+echo "==> 安装系统依赖"
+sudo apt update
+sudo apt install -y \
+    build-essential cmake git \
+    libssl-dev zlib1g-dev \
+    can-utils \
+    python3-websockets wrk
+
+echo "==> 下载 header-only 库"
+cd "$(dirname "$0")/.."
+mkdir -p include
+
+if [ ! -f include/json.hpp ]; then
+    echo "  - nlohmann/json"
+    wget -q -O include/json.hpp \
+        https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
+fi
+
+echo "==> 编译安装 uWebSockets"
+if [ ! -f /usr/local/include/uWebSockets/App.h ] || [ ! -f /usr/lib/libuSockets.a ]; then
+    TMP=$(mktemp -d)
+    cd "$TMP"
+    git clone --recurse-submodules https://github.com/uNetworking/uWebSockets.git
+    cd uWebSockets
+    make
+    sudo make install
+    cd uSockets
+    ar rcs libuSockets.a *.o
+    sudo cp libuSockets.a /usr/lib/
+    sudo ldconfig
+    cd -
+    rm -rf "$TMP"
+fi
+
+echo "==> 验证"
+ls /usr/local/include/uWebSockets/App.h
+ls /usr/lib/libuSockets.a
+ls include/json.hpp
+echo "✅ 依赖就绪"
