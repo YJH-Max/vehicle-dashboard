@@ -62,3 +62,10 @@
 - 4 生产者 × 4 消费者 × 200 万条 = 800 万条
 - pushed == consumed == expected == 8000000
 - 结果：PASS（无丢失、无重复、无死锁）
+
+## 阶段 2：TopicBus 多订阅者验证
+
+- 数据源：CAN vcan0 550 条/秒 稳定写入 TopicBus
+- 订阅者：ws_consumer (20Hz 合并推送) + alarm_consumer (实时阈值判断)
+- 修复：2 核 VM 上 4 个忙等线程饥饿导致 uWS 主线程无法接受新连接
+- 现状：1ms sleep 止血；后续将升级为 condition_variable 阻塞唤醒
