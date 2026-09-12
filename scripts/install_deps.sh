@@ -3,13 +3,16 @@
 # 用法: ./scripts/install_deps.sh
 set -e
 
-echo "==> 安装系统依赖"
+echo "==> 安装编译必需依赖"
 sudo apt update
 sudo apt install -y \
     build-essential cmake git \
-    libssl-dev zlib1g-dev \
-    can-utils \
-    python3-websockets wrk
+    libssl-dev zlib1g-dev
+
+echo "==> 安装调试/测试依赖（可选，失败不阻塞）"
+sudo apt install -y can-utils || echo "  [warn] can-utils 安装失败"
+sudo apt install -y python3-websockets || echo "  [warn] python3-websockets 安装失败"
+sudo apt install -y wrk || echo "  [warn] wrk 安装失败（Ubuntu 24.04 默认源无此包）"
 
 echo "==> 下载 header-only 库"
 cd "$(dirname "$0")/.."
