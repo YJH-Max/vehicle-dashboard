@@ -3,14 +3,15 @@
 #include <chrono>
 #include "topic_bus.hpp"
 
+#include "blocking_queue.hpp"
 struct Sample { double speed; double temp; };
 
 int main() {
     TopicBus<Sample> bus;
 
     using MsgPtr = TopicBus<Sample>::MessagePtr;
-    MpmcQueue<MsgPtr, YieldWait> speed_q(4096);
-    MpmcQueue<MsgPtr, YieldWait> all_q(4096);
+    BlockingQueue<MsgPtr> speed_q(4096);
+    BlockingQueue<MsgPtr> all_q(4096);
 
     auto h1 = bus.subscribe(Topic::Speed, &speed_q);   // 只订车速
     auto h2 = bus.subscribe(Topic::Speed, &all_q);     // 也订车速
@@ -38,8 +39,8 @@ int main() {
 
     int speed_n = 0, all_n = 0;
     MsgPtr p;
-    while (speed_q.consume(p)) ++speed_n;
-    while (all_q.consume(p))   ++all_n;
+    while (speed_q.try_consume(p)) ++speed_n;
+    while (all_q.try_consume(p))   ++all_n;
 
     std::printf("speed_q: %d (expect 100)\n", speed_n);
     std::printf("all_q:   %d (expect 205)\n", all_n);

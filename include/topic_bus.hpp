@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "mpmc_queue.hpp"
+#include "blocking_queue.hpp"
 
 enum class Topic : std::uint8_t {
     Speed,
@@ -31,7 +32,7 @@ public:
     // 阶段2：单进程零拷贝
     // 阶段3：替换为 ShmPtr<const T>（基于 offset_ptr 或 uint32_t 偏移量）
     using MessagePtr = std::shared_ptr<const T>;
-    using SubQueue   = MpmcQueue<MessagePtr, YieldWait>;
+    using SubQueue   = BlockingQueue<MessagePtr>;
     using Callback   = std::function<void(const T&)>;
 
     // RAII 句柄：析构自动注销

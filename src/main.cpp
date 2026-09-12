@@ -23,6 +23,7 @@
 #include "data_pool.hpp"
 #include "data_generator.hpp"
 #include "topic_bus.hpp"
+#include "blocking_queue.hpp"
 
 using json = nlohmann::json;
 using MsgPtr = TopicBus<DataPoint>::MessagePtr;
@@ -136,8 +137,8 @@ int main(int argc, char* argv[]) {
     });
 
     // ---- 订阅者队列 + 注册 ----
-    MpmcQueue<MsgPtr, YieldWait> ws_q(8192);
-    MpmcQueue<MsgPtr, YieldWait> alarm_q(1024);
+    BlockingQueue<MsgPtr> ws_q(8192);
+    BlockingQueue<MsgPtr> alarm_q(1024);
     auto h_ws    = bus.subscribe(Topic::Speed, &ws_q);
     auto h_alarm = bus.subscribe(Topic::Speed, &alarm_q);
 
@@ -199,16 +200,14 @@ int main(int argc, char* argv[]) {
         auto next_pub = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
 
         while (running.load(std::memory_order_relaxed)) {
-            if (ws_q.consume(msg)) {
-                snapshot = *msg;   // 只更新快照，不立即推送
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            // 20ms 超时：有数据立即唤醒；无数据时用于检查推送周期
+            if (ws_q.consume_blocking(msg, 20)) {
+                snapshot = *msg;
             }
-
             const auto now = std::chrono::steady_clock::now();
             if (now >= next_pub) {
                 next_pub += std::chrono::milliseconds(50);
-                DataPoint s = snapshot;  // 拷贝一份供 lambda 捕获
+                DataPoint s = snapshot;
                 loop->defer([&app, s] {
                     app.publish("telemetry", snapJson(s).dump(), uWS::OpCode::TEXT);
                 });
@@ -220,13 +219,11 @@ int main(int argc, char* argv[]) {
     std::thread alarm_consumer([&] {
         MsgPtr msg;
         while (running.load(std::memory_order_relaxed)) {
-            if (alarm_q.consume(msg)) {
+            if (alarm_q.consume_blocking(msg, -1)) {   // 无限等待
                 if (msg->speed > 130.0) {
                     std::printf("[ALARM] 车速 %.1f km/h 超阈值 130\n", msg->speed);
                     std::fflush(stdout);
                 }
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
     });
@@ -240,6 +237,8 @@ int main(int argc, char* argv[]) {
 
     // ---- 停机顺序：先停数据源 → 停总线 → 停订阅者 → 停 consumer ----
     running.store(false);
+    ws_q.stop();
+    alarm_q.stop();
     dataThread.join();
     bus.stop();
     ws_consumer.join();
