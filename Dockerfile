@@ -18,8 +18,8 @@ RUN wget -q -O /src/include/json.hpp \
 
 # 依赖：uWebSockets
 RUN git clone --recurse-submodules --depth 1 \
-    https://github.com/uNetworking/uWebSockets.git /tmp/uws && \
-    cd /tmp/uws && make && make install && \
+    https://github.com/uNetworking/uWebSockets.git /root/uWebSockets && \
+    cd /root/uWebSockets && make && make install && \
     cd uSockets && ar rcs libuSockets.a *.o && \
     cp libuSockets.a /usr/lib/ && ldconfig
 

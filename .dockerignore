@@ -1,0 +1,25 @@
+# 编译产物（关键！避免 CMake 缓存污染镜像）
+build/
+*.o
+*.a
+
+# Git 历史（进镜像没意义，减体积）
+.git/
+.gitignore
+
+# 备份和临时文件
+*.bak
+*.broken
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 文档（runtime 不需要）
+docs/
+README.md
