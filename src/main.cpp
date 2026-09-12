@@ -27,7 +27,7 @@
 using json = nlohmann::json;
 
 // ---------------- 基准模式：./dashboard --bench（原样保留） ----------------
-static int runBench() {
+static int runBench1P1C() {
     DataPool pool;
     std::atomic<bool> running{true};
     constexpr auto kDuration = std::chrono::seconds(5);
@@ -38,7 +38,7 @@ static int runBench() {
 
     const auto start = std::chrono::steady_clock::now();
     std::uint64_t pushed = 0;
-    DataPoint d{0.0, 60.0, 50.0};
+    DataPoint d{Timestamp{}, 60.0, 50.0};
 
     while (std::chrono::steady_clock::now() - start < kDuration) {
         if (pool.produce(d)) ++pushed;
@@ -49,7 +49,7 @@ static int runBench() {
     consumer.join();
 
     const std::uint64_t consumed = pool.totalConsumed();
-    std::printf("\n===== SPSC RingBuffer Benchmark (5 s) =====\n");
+    std::printf("\n===== MPMC Benchmark (1P1C, 5 s) =====\n");
     std::printf("pushed    : %llu\n", (unsigned long long)pushed);
     std::printf("consumed  : %llu\n", (unsigned long long)consumed);
     std::printf("throughput: %.2f million items/sec\n", consumed / 5.0 / 1e6);
@@ -64,7 +64,7 @@ static std::string readFile(const std::string& path) {
 
 static json latestJson(DataPool& pool) {
     auto snap = pool.snapshot();
-    return {{"timestamp", snap.latest.timestamp},
+    return {{"timestamp", snap.latest.timestamp.ms},
             {"speed", snap.latest.speed},
             {"temp", snap.latest.temp}};
 }
@@ -104,9 +104,6 @@ static bool canSourceThread(DataPool& pool, const char* iface,
         const ssize_t n = read(s, &f, sizeof(f));
         if (n < (ssize_t)sizeof(can_frame)) continue;
 
-        const double ts = std::chrono::duration<double, std::milli>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-
         const std::uint16_t raw =
             (std::uint16_t)f.data[0] | (std::uint16_t(f.data[1]) << 8);  // 小端
 
@@ -114,7 +111,7 @@ static bool canSourceThread(DataPool& pool, const char* iface,
             case 0x101: lastSpeed = raw / 10.0; break;   // 0.1 km/h 分辨率
             case 0x102: lastTemp  = raw / 10.0; break;   // 0.1 °C  分辨率
         }
-        pool.produce({ts, lastSpeed, lastTemp});         // 每帧产出一条 → ~550 条/秒
+        pool.produce({Timestamp::now(), lastSpeed, lastTemp});         // 每帧产出一条 → ~550 条/秒
     }
     close(s);
     return true;
@@ -152,7 +149,7 @@ int main(int argc, char* argv[]) {
         auto snap = pool.snapshot();
         json j = json::array();
         for (const auto& d : snap.history)
-            j.push_back({{"timestamp", d.timestamp}, {"speed", d.speed}, {"temp", d.temp}});
+            j.push_back({{"timestamp", d.timestamp.ms}, {"speed", d.speed}, {"temp", d.temp}});
         res->writeHeader("Content-Type", "application/json")->end(j.dump());
     });
 
@@ -186,6 +183,7 @@ int main(int argc, char* argv[]) {
                     app.publish("telemetry", latestJson(pool).dump(), uWS::OpCode::TEXT);
                 });
             }
+
 
             if (std::chrono::duration<double>(now - last_report).count() >= 1.0) {
                 last_report = now;
