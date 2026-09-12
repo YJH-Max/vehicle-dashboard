@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: ./scripts/install_deps.sh
+
+      - name: 配置 CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: 编译
+        run: cmake --build build -j$(nproc)
+
+      - name: 运行单元测试
+        working-directory: build
+        run: ctest --output-on-failure
