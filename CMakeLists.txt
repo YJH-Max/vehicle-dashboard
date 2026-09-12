@@ -9,6 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 include_directories(include
+    /usr/local/include/uWebSockets
     $ENV{HOME}/uWebSockets/src
     $ENV{HOME}/uWebSockets/uSockets/src)
 
