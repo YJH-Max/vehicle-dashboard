@@ -8,6 +8,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <iomanip>
 #include <thread>
 #include <unistd.h>
 
@@ -24,6 +25,7 @@
 #include "data_generator.hpp"
 #include "topic_bus.hpp"
 #include "blocking_queue.hpp"
+#include "logger.hpp"
 
 using json = nlohmann::json;
 using MsgPtr = TopicBus<DataPoint>::MessagePtr;
@@ -81,7 +83,7 @@ static bool canSourceThread(DataPool& pool,
     ifreq ifr{};
     std::strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
     if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) {
-        std::fprintf(stderr, "[can] 接口 %s 不存在\n", iface);
+        LOG_ERROR(std::string("[can] 接口 ") + iface + " 不存在");
         return false;
     }
 
@@ -95,8 +97,7 @@ static bool canSourceThread(DataPool& pool,
     can_filter filt[2] = {{0x101, CAN_SFF_MASK}, {0x102, CAN_SFF_MASK}};
     setsockopt(s, SOL_CAN_RAW, CAN_RAW_FILTER, filt, sizeof(filt));
 
-    std::printf("[can] 数据源: %s (0x101 车速 / 0x102 水温)\n", iface);
-    std::fflush(stdout);
+    LOG_INFO(std::string("[can] 数据源: ") + iface + " (0x101 车速 / 0x102 水温)");
 
     can_frame f;
     double lastSpeed = 0.0, lastTemp = 70.0;
@@ -122,7 +123,8 @@ static bool canSourceThread(DataPool& pool,
 
 int main(int argc, char* argv[]) {
     if (argc > 1 && std::string(argv[1]) == "--bench") return runBench1P1C();
-
+    Logger::instance().init("vehicle.log", LogLevel::INFO);
+    LOG_INFO("=== dashboard starting ===");
     DataPool pool;
     TopicBus<DataPoint> bus;
     std::atomic<bool> running{true};
@@ -131,7 +133,7 @@ int main(int argc, char* argv[]) {
     std::thread dataThread([&] {
         if (argc > 2 && std::string(argv[1]) == "--can") {
             if (canSourceThread(pool, bus, argv[2], running)) return;
-            std::fprintf(stderr, "[can] 启动失败，自动回退到内部模拟源\n");
+            LOG_WARN("[can] 启动失败，自动回退到内部模拟源");
         }
         dataGenerator(pool, bus, 1000, running);
     });
@@ -221,8 +223,7 @@ int main(int argc, char* argv[]) {
         while (running.load(std::memory_order_relaxed)) {
             if (alarm_q.consume_blocking(msg, -1)) {   // 无限等待
                 if (msg->speed > 130.0) {
-                    std::printf("[ALARM] 车速 %.1f km/h 超阈值 130\n", msg->speed);
-                    std::fflush(stdout);
+                    { std::ostringstream _ss; _ss << "[ALARM] 车速 " << std::fixed << std::setprecision(1) << msg->speed << " km/h 超阈值 130"; LOG_WARN(_ss.str()); }
                 }
             }
         }
@@ -244,5 +245,6 @@ int main(int argc, char* argv[]) {
     ws_consumer.join();
     alarm_consumer.join();
     consumer.join();
+    Logger::instance().shutdown();
     return 0;
 }
