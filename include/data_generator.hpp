@@ -1,6 +1,9 @@
 #pragma once
 #include <atomic>
 #include "data_pool.hpp"
+#include "topic_bus.hpp"
 
-// rate_hz: 每秒生成多少帧数据
-void dataGenerator(DataPool& pool, int rate_hz, const std::atomic<bool>& running);
+void dataGenerator(DataPool& pool,
+                   TopicBus<DataPoint>& bus,
+                   int rate_hz,
+                   const std::atomic<bool>& running);

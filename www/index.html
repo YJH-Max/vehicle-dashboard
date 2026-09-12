@@ -3,149 +3,86 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🚗 车载数据监控仪表盘</title>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js">
-    </script>
+    <title>车载数据监控仪表盘</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
-            background: #0b0e1a;
-            color: #e0e6f0;
-            padding: 20px;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            background: #0b0e1a; color: #e0e6f0;
+            padding: 20px; min-height: 100vh;
+            display: flex; justify-content: center; align-items: center;
         }
         .dashboard {
-            max-width: 1200px;
-            width: 100%;
+            max-width: 1200px; width: 100%;
             background: linear-gradient(145deg, #131a2e, #1a2338);
-            border-radius: 24px;
-            padding: 30px;
+            border-radius: 24px; padding: 30px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
             border: 1px solid #2a3a5a;
         }
         h1 {
-            font-size: 26px;
-            font-weight: 300;
-            letter-spacing: 2px;
-            color: #8ab4f8;
-            margin-bottom: 25px;
-            border-left: 4px solid #4a7cf7;
-            padding-left: 16px;
+            font-size: 26px; font-weight: 300; letter-spacing: 2px;
+            color: #8ab4f8; margin-bottom: 25px;
+            border-left: 4px solid #4a7cf7; padding-left: 16px;
         }
         .metrics {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 28px;
+            display: grid; grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px; margin-bottom: 28px;
         }
         .metric-card {
             background: rgba(255, 255, 255, 0.04);
-            backdrop-filter: blur(4px);
-            border-radius: 16px;
-            padding: 18px 22px;
+            border-radius: 16px; padding: 18px 22px;
             border: 1px solid rgba(255, 255, 255, 0.06);
-            transition: all 0.2s;
-        }
-        .metric-card:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(74, 124, 247, 0.3);
         }
         .metric-label {
-            font-size: 13px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #8899bb;
-            margin-bottom: 6px;
+            font-size: 13px; text-transform: uppercase;
+            letter-spacing: 1px; color: #8899bb; margin-bottom: 6px;
         }
-        .metric-value {
-            font-size: 36px;
-            font-weight: 600;
-            letter-spacing: 1px;
-        }
+        .metric-value { font-size: 36px; font-weight: 600; }
         .metric-value .unit {
-            font-size: 18px;
-            font-weight: 400;
-            color: #8899bb;
-            margin-left: 6px;
+            font-size: 18px; font-weight: 400;
+            color: #8899bb; margin-left: 6px;
         }
-        .speed-color {
-            color: #4fc3f7;
-        }
-        .temp-color {
-            color: #ff8a65;
-        }
-        .latency-color {
-            color: #81c784;
-        }
+        .speed-color { color: #4fc3f7; }
+        .temp-color { color: #ff8a65; }
+        .latency-color { color: #81c784; }
         .chart-container {
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 16px;
+            background: rgba(0, 0, 0, 0.3); border-radius: 16px;
             padding: 20px 10px 10px 10px;
             border: 1px solid rgba(255, 255, 255, 0.05);
-            margin-top: 5px;
         }
-        #chart {
-            width: 100%;
-            height: 320px;
-        }
+        #chart { width: 100%; height: 320px; }
         .footer {
-            margin-top: 20px;
-            font-size: 12px;
-            color: #445577;
-            text-align: right;
-            border-top: 1px solid #1a2338;
+            margin-top: 20px; font-size: 12px; color: #445577;
+            text-align: right; border-top: 1px solid #1a2338;
             padding-top: 15px;
         }
         .badge {
-            display: inline-block;
-            background: #1a2a44;
-            border-radius: 20px;
-            padding: 2px 12px;
-            font-size: 11px;
-            color: #6a8fc0;
-            margin-left: 10px;
-        }
-        @media (max-width: 700px) {
-            .metrics {
-                grid-template-columns: 1fr;
-            }
-            .metric-value {
-                font-size: 28px;
-            }
+            display: inline-block; background: #1a2a44;
+            border-radius: 20px; padding: 2px 12px;
+            font-size: 11px; color: #6a8fc0; margin-left: 10px;
         }
     </style>
 </head>
 <body>
-
     <div class="dashboard">
-        <h1>
-            🚗 实时车辆数据
-            <span class="badge">LIVE</span>
-        </h1>
+        <h1>实时车辆数据 <span class="badge">LIVE</span></h1>
 
         <div class="metrics">
             <div class="metric-card">
-                <div class="metric-label">📊 当前车速</div>
+                <div class="metric-label">当前车速</div>
                 <div class="metric-value speed-color">
                     <span id="speedDisplay">--</span><span class="unit">km/h</span>
                 </div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">🌡️ 发动机温度</div>
+                <div class="metric-label">发动机温度</div>
                 <div class="metric-value temp-color">
                     <span id="tempDisplay">--</span><span class="unit">°C</span>
                 </div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">⏱️ 数据延迟</div>
+                <div class="metric-label">数据延迟</div>
                 <div class="metric-value latency-color">
                     <span id="latencyDisplay">--</span><span class="unit">ms</span>
                 </div>
@@ -155,87 +92,116 @@
         <div class="chart-container">
             <div id="chart"></div>
         </div>
+
         <div class="footer">
-            <span id="updateTime">--</span>  ·  数据源: C++ 模拟传感器 (1000Hz)
+            <span id="updateTime">--</span>  ·  数据源: SocketCAN vcan0 (0x101/0x102)
         </div>
     </div>
 
     <script>
-    // ========== 初始化 ECharts ==========
-    const chart = echarts.init(document.getElementById('chart'));
-    const option = {
-        tooltip: { trigger: 'axis', backgroundColor: 'rgba(20,30,50,0.9)', borderColor: '#2a3a5a', textStyle: { color: '#e0e6f0' } },
-        legend: { data: ['车速 (km/h)', '温度 (°C)'], textStyle: { color: '#8899bb' }, top: 0, right: 10 },
-        grid: { left: 50, right: 30, bottom: 30, top: 40 },
-        xAxis: { type: 'category', data: [], axisLine: { lineStyle: { color: '#2a3a5a' } }, axisLabel: { color: '#667799', fontSize: 11 }, splitLine: { show: false } },
-        yAxis: [{ type: 'value', name: '车速 (km/h)', min: 0, max: 150, axisLabel: { color: '#667799' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }, axisLine: { show: false } },
-                { type: 'value', name: '温度 (°C)', min: 0, max: 100, axisLabel: { color: '#667799' }, splitLine: { show: false }, axisLine: { show: false } }],
-        series: [{ name: '车速 (km/h)', type: 'line', data: [], smooth: true, symbol: 'none', lineStyle: { color: '#4fc3f7', width: 2 }, areaStyle: { color: 'rgba(79,195,247,0.15)' }, yAxisIndex: 0 },
-                 { name: '温度 (°C)', type: 'line', data: [], smooth: true, symbol: 'none', lineStyle: { color: '#ff8a65', width: 2 }, areaStyle: { color: 'rgba(255,138,101,0.12)' }, yAxisIndex: 1 }]
-    };
-    chart.setOption(option);
+        const chart = echarts.init(document.getElementById('chart'));
 
-    function formatTime(ts) {
-        if (!ts || ts <= 0) return '--';
-        return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
-    }
-
-    // ========== 渲染逻辑（初始加载与 WS 推送共用）==========
-    const MAX_POINTS = 100;
-    let points = [];   // 前端镜像 RingBuffer
-
-    function updateUI(latest, pts) {
-        document.getElementById('speedDisplay').innerText =
-            latest.speed !== undefined && latest.speed !== null ? latest.speed.toFixed(1) : '--';
-        document.getElementById('tempDisplay').innerText =
-            latest.temp !== undefined && latest.temp !== null ? latest.temp.toFixed(1) : '--';
-        if (latest.timestamp)
-            document.getElementById('updateTime').innerText = '更新于: ' + formatTime(latest.timestamp);
-
-        const speedData = [], tempData = [], timeLabels = [];
-        for (let i = 0; i < pts.length; i++) {
-            timeLabels.push((i + 1).toString());
-            speedData.push(pts[i].speed || 0);
-            tempData.push(pts[i].temp || 0);
-        }
-        chart.setOption({ xAxis: { data: timeLabels }, series: [{ data: speedData }, { data: tempData }] });
-    }
-
-    // 真实延迟 = 本机时钟 - 服务端时间戳
-    function showLatency(p) {
-        if (p.timestamp) {
-            const latency = Math.max(0, Math.round(Date.now() - p.timestamp));
-            document.getElementById('latencyDisplay').innerText = latency;
-        }
-    }
-
-    // ========== 启动：拉一次历史垫底 → 切换到 WS 推送 ==========
-    async function boot() {
-        try {
-            const r = await fetch('/api/history');
-            points = await r.json();
-            if (points.length) updateUI(points[points.length - 1], points);
-        } catch (e) { console.warn('历史加载失败，仅靠 WS 推送', e); }
-        connectWS();
-    }
-
-    function connectWS() {
-        const ws = new WebSocket(`ws://${location.host}/ws`);   // 后端若是 .ws("/*") 就把 /ws 去掉
-
-        ws.onopen = () => console.log('[WS] 已连接');
-        ws.onmessage = (e) => {
-            const p = JSON.parse(e.data);
-            points.push(p);
-            if (points.length > MAX_POINTS) points.shift();
-            updateUI(p, points);
-            showLatency(p);
+        const option = {
+            tooltip: { trigger: 'axis' },
+            legend: {
+                data: ['车速 (km/h)', '温度 (°C)'],
+                textStyle: { color: '#8899bb' },
+                top: 0, right: 10
+            },
+            grid: { left: 50, right: 30, bottom: 30, top: 40 },
+            xAxis: {
+                type: 'category', data: [],
+                axisLine: { lineStyle: { color: '#2a3a5a' } },
+                axisLabel: { color: '#667799', fontSize: 11 }
+            },
+            yAxis: [
+                { type: 'value', name: '车速', min: 0, max: 150,
+                  axisLabel: { color: '#667799' },
+                  splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } } },
+                { type: 'value', name: '温度', min: 0, max: 100,
+                  axisLabel: { color: '#667799' },
+                  splitLine: { show: false } }
+            ],
+            series: [
+                { name: '车速 (km/h)', type: 'line', data: [],
+                  smooth: true, symbol: 'none',
+                  lineStyle: { color: '#4fc3f7', width: 2 },
+                  areaStyle: { color: 'rgba(79, 195, 247, 0.15)' },
+                  yAxisIndex: 0 },
+                { name: '温度 (°C)', type: 'line', data: [],
+                  smooth: true, symbol: 'none',
+                  lineStyle: { color: '#ff8a65', width: 2 },
+                  areaStyle: { color: 'rgba(255, 138, 101, 0.12)' },
+                  yAxisIndex: 1 }
+            ]
         };
-        ws.onclose = () => { console.warn('[WS] 断开，1s 后重连'); setTimeout(connectWS, 1000); };
-        ws.onerror = () => ws.close();
-    }
+        chart.setOption(option);
 
-    boot();
-</script>
+        function formatTime(ts) {
+            if (!ts || ts <= 0) return '--';
+            return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
+        }
 
+        const MAX_POINTS = 100;
+        let points = [];
+
+        function updateUI(latest, pts) {
+            document.getElementById('speedDisplay').innerText =
+                latest.speed !== undefined && latest.speed !== null ? latest.speed.toFixed(1) : '--';
+            document.getElementById('tempDisplay').innerText =
+                latest.temp !== undefined && latest.temp !== null ? latest.temp.toFixed(1) : '--';
+            if (latest.timestamp)
+                document.getElementById('updateTime').innerText = '更新于: ' + formatTime(latest.timestamp);
+
+            const speedData = [], tempData = [], timeLabels = [];
+            for (let i = 0; i < pts.length; i++) {
+                timeLabels.push((i + 1).toString());
+                speedData.push(pts[i].speed || 0);
+                tempData.push(pts[i].temp || 0);
+            }
+            chart.setOption({
+                xAxis: { data: timeLabels },
+                series: [{ data: speedData }, { data: tempData }]
+            });
+        }
+
+        function showLatency(p) {
+            if (p.timestamp) {
+                const latency = Math.max(0, Math.round(Date.now() - p.timestamp));
+                document.getElementById('latencyDisplay').innerText = latency;
+            }
+        }
+
+        async function boot() {
+            try {
+                const r = await fetch('/api/history');
+                points = await r.json();
+                if (points.length) updateUI(points[points.length - 1], points);
+            } catch (e) {
+                console.warn('历史加载失败，仅靠 WS 推送', e);
+            }
+            connectWS();
+        }
+
+        function connectWS() {
+            const wsUrl = 'ws://' + location.host + '/ws';
+            const ws = new WebSocket(wsUrl);
+            ws.onopen = () => console.log('[WS] 已连接');
+            ws.onmessage = (e) => {
+                const p = JSON.parse(e.data);
+                points.push(p);
+                if (points.length > MAX_POINTS) points.shift();
+                updateUI(p, points);
+                showLatency(p);
+            };
+            ws.onclose = () => {
+                console.warn('[WS] 断开，1s 后重连');
+                setTimeout(connectWS, 1000);
+            };
+            ws.onerror = () => ws.close();
+        }
+
+        boot();
+    </script>
 </body>
 </html>

@@ -24,3 +24,5 @@ add_test(NAME ring_spsc_test COMMAND test_ring)
 add_executable(can_producer src/can_producer.cpp)
 
 add_executable(bench_mpmc tests/bench_mpmc.cpp)
+
+add_executable(test_topic_bus tests/test_topic_bus.cpp)

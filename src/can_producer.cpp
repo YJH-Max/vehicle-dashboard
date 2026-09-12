@@ -43,6 +43,7 @@ int main(int argc, char** argv) {
 
     while (true) {
         next += period;
+        
         std::this_thread::sleep_until(next);
         t += 1.0 / rate;
 
