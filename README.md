@@ -62,6 +62,9 @@ cmake --build build -j$(nproc)
 
 不带参数启动时使用内部模拟源（1000Hz）；`--can` 指定的总线起不来会自动回退。`./build/dashboard --bench` 跑队列基准。
 
+告警阈值可配：`./build/dashboard --can vcan0 --alarm-threshold 100`（默认 130 km/h）。
+生产者注入超速用于验证告警链路：`./build/can_producer vcan0 500 --inject-over 145`（每 5 秒注入 1 秒超速）。
+
 ## Docker
 
 ```bash
@@ -141,6 +144,10 @@ MPMC 单线程比 SPSC 慢 29% 是预期内的，CAS 比纯原子 load/store 贵
 
 **阻塞唤醒**：`BlockingQueue` 空闲时消费者用 `condition_variable` 挂起，不占 CPU；数据到即唤醒。替代 1ms 轮询后，`top -bn1 -p $(pgrep dashboard)` 采 10 秒均值，dashboard 进程 CPU 从 ~15% 降到 ~10%。
 
+**告警去抖**：`alarm_consumer` 加 1 秒冷却期，防止 500Hz 数据刷爆日志——真实车载告警系统都需要这层过滤。
+
+**drop 计数**：`TopicBus::deliver` 检查订阅者队列的 `produce` 返回值，累加 `dropped_`；每秒和 `dispatched` 一起打印，丢包不再静默。
+
 **内核态 CAN 过滤**：`CAN_RAW_FILTER` 只放行 0x101/0x102，其余报文不进用户态。
 
 **线程安全广播**：uWS 是单线程事件循环，工作线程通过 `loop->defer()` 把 `publish` 投递回事件循环线程执行。
@@ -186,7 +193,7 @@ cd build && ctest --output-on-failure
 │   ├── topic_bus.hpp        发布订阅总线
 │   ├── data_pool.hpp        历史数据池 / 降采样
 │   ├── logger.hpp           异步日志
-│   ├── net_reporter.hpp     TCP 上报
+│   ├── net_reporter.hpp     TCP 上报（退避期抽干 / 20Hz 采样 / 指数重连）
 │   └── timestamp.hpp        强类型时间戳（毫秒）
 ├── src/
 │   ├── main.cpp             服务端：CAN 收帧 + TopicBus + REST + WS
@@ -217,6 +224,8 @@ cd build && ctest --output-on-failure
 **2 vCPU 忙等饿死事件循环**：4 个 `while + yield` 线程把两个核占满，uWS 主线程收不到新的 WS 连接。先用 1ms sleep 止血，再用 `BlockingQueue` 做正经方案。
 
 **Docker 内 CMake 缓存污染**：宿主机 `build/` 被 COPY 进镜像，CMakeCache.txt 指向宿主机路径。加 `.dockerignore` 排除。
+
+**drop 计数暴露真实缺陷**：加 `dropped_` 计数器后测试发现每秒丢 550 条——根因是 `NetReporter` 退避期只在每次重连时抽干队列一次，30 秒退避期内队列持续堆积。改成退避期每 50ms 抽干一次后 dropped 全程 0。这个问题只有加了 drop 计数才暴露。
 
 ## 常见问题
 
