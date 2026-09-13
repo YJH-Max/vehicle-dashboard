@@ -25,7 +25,7 @@ can_source_thread   0x101 / 0x102 各持最新值 -> 合成一条 DataPoint
     +--> TopicBus.publish(Topic::Telemetry)
               |  独立分发线程，每个订阅者一条私有 BlockingQueue
               +--> ws_q    (8192) --> 20Hz 合并 + loop->defer() --> uWS publish --> 浏览器
-              +--> alarm_q (1024) --> 车速 > 130 km/h --> LOG_WARN
+              +--> alarm_q (1024) --> 车速 > 阈值（默认 130） --> LOG_WARN
               +--> net_q   (4096) --> NetReporter --> TCP 9000（指数退避重连）
 ```
 
@@ -48,13 +48,16 @@ Logger 是第四个消费端：各线程只把日志字符串塞进无锁队列�
 # 依赖（Ubuntu 24.04）
 ./scripts/install_deps.sh
 
+# 编译（一次性）
+./scripts/install_deps.sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
+
 # 终端 1：虚拟 CAN 总线 + 模拟 ECU
 ./scripts/setup_vcan.sh
 ./build/can_producer
 
 # 终端 2：启动服务
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
 ./build/dashboard --can vcan0
 
 # 浏览器打开 http://localhost:8080
@@ -142,7 +145,7 @@ MPMC 单线程比 SPSC 慢 29% 是预期内的，CAS 比纯原子 load/store 贵
 
 **发布订阅**：数据源只调 `publish(Topic, 数据)`，不知道有多少订阅者。分发线程查 Topic 对应的订阅者列表，给每个订阅者的队列 push 一份。`deliver` 在锁内快照订阅者列表、锁外执行回调，避免持锁调回调死锁。
 
-**阻塞唤醒**：`BlockingQueue` 空闲时消费者用 `condition_variable` 挂起，不占 CPU；数据到即唤醒。替代 1ms 轮询后，`top -bn1 -p $(pgrep dashboard)` 采 10 秒均值，dashboard 进程 CPU 从 ~15% 降到 ~10%。
+**阻塞唤醒**：`BlockingQueue` 空闲时消费者用 `condition_variable` 挂起，不占 CPU；数据到即唤醒。替代 1ms 轮询后，`top -bn1 -p $(pgrep dashboard)` 单次采样，dashboard 进程 CPU 从 ~15% 降到 ~10%。
 
 **告警去抖**：`alarm_consumer` 加 1 秒冷却期，防止 500Hz 数据刷爆日志——真实车载告警系统都需要这层过滤。
 
