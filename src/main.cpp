@@ -31,6 +31,7 @@
 #include <csignal>
 
 static std::atomic<bool> g_should_stop{false};
+static double g_alarm_threshold = 130.0;
 static void onSignal(int) { g_should_stop.store(true); }
 using json = nlohmann::json;
 using MsgPtr = TopicBus<DataPoint>::MessagePtr;
@@ -134,6 +135,12 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT,  onSignal);
     std::signal(SIGTERM, onSignal);
     if (argc > 1 && std::string(argv[1]) == "--bench") return runBench1P1C();
+
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "--alarm-threshold") {
+            g_alarm_threshold = std::atof(argv[i + 1]);
+        }
+    }
     Logger::instance().init("vehicle.log", LogLevel::INFO);
     LOG_INFO("=== dashboard starting ===");
     DataPool pool;
@@ -248,10 +255,22 @@ int main(int argc, char* argv[]) {
     // 新增 alarm_consumer：订阅者, 实时判断告警
     std::thread alarm_consumer([&] {
         MsgPtr msg;
+        auto last_alarm = std::chrono::steady_clock::time_point{};
+        constexpr auto kCooldown = std::chrono::seconds(1);   // 去抖：1 秒内只报一次
+
         while (running.load(std::memory_order_relaxed)) {
-            if (alarm_q.consume_blocking(msg, -1)) {   // 无限等待
-                if (msg->speed > 130.0) {
-                    { std::ostringstream _ss; _ss << "[ALARM] 车速 " << std::fixed << std::setprecision(1) << msg->speed << " km/h 超阈值 130"; LOG_WARN(_ss.str()); }
+            if (alarm_q.consume_blocking(msg, -1)) {
+                if (msg->speed > g_alarm_threshold) {
+                    auto now = std::chrono::steady_clock::now();
+                    if (now - last_alarm < kCooldown) continue;   // 冷却期内丢弃
+                    last_alarm = now;
+
+                    std::ostringstream _ss;
+                    _ss << "[ALARM] 车速 " << std::fixed << std::setprecision(1)
+                        << msg->speed << " km/h 超阈值 " << g_alarm_threshold;
+                    LOG_WARN(_ss.str());
+                    std::printf("%s\n", _ss.str().c_str());
+                    std::fflush(stdout);
                 }
             }
         }

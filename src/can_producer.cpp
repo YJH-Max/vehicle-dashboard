@@ -17,6 +17,13 @@
 int main(int argc, char** argv) {
     const char* iface = argc > 1 ? argv[1] : "vcan0";
     int rate = argc > 2 ? atoi(argv[2]) : 500;          // 车速帧频率
+    double inject_over = 0.0;                            // --inject-over 时启用
+
+    for (int i = 3; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--inject-over") == 0 && i + 1 < argc) {
+            inject_over = std::atof(argv[++i]);
+        }
+    }
 
     int s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
     if (s < 0) { perror("socket"); return 1; }
@@ -48,6 +55,9 @@ int main(int argc, char** argv) {
         t += 1.0 / rate;
 
         double speed = 60 + 30 * std::sin(t / 5.0) + 5 * std::sin(t * 1.7);
+        if (inject_over > 0.0 && std::fmod(t, 5.0) < 1.0) {
+            speed = inject_over + 3.0 * std::sin(t * 8.0);   // 每 5s 注入 1s 超速
+        }
         double temp  = 70 + 8  * std::sin(t / 30.0);
         uint16_t s10 = (uint16_t)std::lround(speed * 10);
         uint16_t t10 = (uint16_t)std::lround(temp * 10);
