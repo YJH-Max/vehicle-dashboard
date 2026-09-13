@@ -27,3 +27,9 @@ add_executable(can_producer src/can_producer.cpp)
 add_executable(bench_mpmc tests/bench_mpmc.cpp)
 
 add_executable(test_topic_bus tests/test_topic_bus.cpp)
+target_link_libraries(test_topic_bus pthread)
+add_test(NAME topic_bus_test COMMAND test_topic_bus)
+
+add_executable(test_data_pool tests/test_data_pool.cpp)
+target_link_libraries(test_data_pool pthread)
+add_test(NAME data_pool_test COMMAND test_data_pool)
