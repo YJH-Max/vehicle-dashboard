@@ -67,6 +67,10 @@ static int runBench1P1C() {
 
 static std::string readFile(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::fprintf(stderr, "[readFile] cannot open %s\n", path.c_str());
+        return "";
+    }
     std::ostringstream ss; ss << in.rdbuf();
     return ss.str();
 }
@@ -184,6 +188,10 @@ int main(int argc, char* argv[]) {
     });
 
     const std::string indexHtml = readFile("./www/index.html");
+    const std::string echartsJs = readFile("./www/echarts.min.js");
+    app.get("/echarts.min.js", [&echartsJs](auto* res, auto* /*req*/) {
+        res->writeHeader("Content-Type", "application/javascript")->end(echartsJs);
+    });
     app.get("/", [&indexHtml](auto* res, auto* /*req*/) {
         res->writeHeader("Content-Type", "text/html; charset=utf-8")->end(indexHtml);
     });
