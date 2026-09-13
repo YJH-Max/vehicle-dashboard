@@ -184,7 +184,8 @@
         }
 
         function connectWS() {
-            const wsUrl = 'ws://' + location.host + '/ws';
+            const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const wsUrl = proto + location.host + '/ws';
             const ws = new WebSocket(wsUrl);
             ws.onopen = () => console.log('[WS] 已连接');
             ws.onmessage = (e) => {
