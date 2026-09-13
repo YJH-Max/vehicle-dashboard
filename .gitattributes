@@ -1,0 +1,7 @@
+# 统一换行符：仓库内一律 LF，避免 Windows 检出时变成 CRLF 造成全文件 diff
+* text=auto eol=lf
+
+# 图片不做换行符转换
+*.png binary
+*.jpg binary
+*.ico binary
