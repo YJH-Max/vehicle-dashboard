@@ -15,3 +15,4 @@ vehicle.log
 *.log
 *.log
 *.log
+build-tsan/

@@ -94,3 +94,31 @@
 - 有明确的量化证据支撑这个取舍，而不是"无锁一定更快"的教条
 
 **这件事的工程价值**：先假设、再测量、发现结果与预期不符、分析原因、把"意外"写进文档。这是工程判断，不是背结论。
+
+
+## ThreadSanitizer 检测
+
+用 -fsanitize=thread -g -O1 重新编译并运行单元测试与 MPMC 基准。
+
+    mkdir -p build-tsan && cd build-tsan
+    cmake -DCMAKE_CXX_FLAGS="-fsanitize=thread -g -O1" \
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" ..
+    cmake --build . -j$(nproc) --target test_ring test_topic_bus test_data_pool bench_mpmc
+
+    # 内核 ASLR 熵值与 TSan shadow memory 布局不兼容时，需禁用地址随机化
+    setarch $(uname -m) -R ./test_ring
+    setarch $(uname -m) -R ./test_topic_bus
+    setarch $(uname -m) -R ./bench_mpmc
+
+| 测试 | 结果 |
+|------|------|
+| test_ring（SPSC/MPMC 并发正确性） | 0 race |
+| test_topic_bus（多订阅者分发与句柄生命周期） | 0 race |
+| bench_mpmc（4P4C × 800 万条，零丢失） | 0 race |
+
+结论：acquire/release 内存序配对、alignas(64) 缓存行隔离、deliver 锁内快照-锁外回调，均未见数据竞争报告。
+
+环境说明：
+
+- 内核 7.0.0-28-generic 的 ASLR 熵值与 TSan 影子映射不兼容，直接运行会报 FATAL: ThreadSanitizer: unexpected memory mapping，需用 setarch -R 禁用地址随机化。这是 TSan 与内核版本的已知兼容性问题，不是代码问题。
+- TSan 插桩后 bench_mpmc 从 10.88 M/s 降到 1.45 M/s（约 7.5 倍开销），这是每次内存访问都查影子内存的固有代价，不是性能回归。
