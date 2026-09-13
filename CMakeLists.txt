@@ -33,3 +33,6 @@ add_test(NAME topic_bus_test COMMAND test_topic_bus)
 add_executable(test_data_pool tests/test_data_pool.cpp)
 target_link_libraries(test_data_pool pthread)
 add_test(NAME data_pool_test COMMAND test_data_pool)
+
+add_executable(bench_mutex_vs tests/bench_mutex_vs_lockfree.cpp)
+target_link_libraries(bench_mutex_vs pthread)
