@@ -26,6 +26,7 @@
 #include "topic_bus.hpp"
 #include "blocking_queue.hpp"
 #include "logger.hpp"
+#include "net_reporter.hpp"
 
 using json = nlohmann::json;
 using MsgPtr = TopicBus<DataPoint>::MessagePtr;
@@ -141,10 +142,23 @@ int main(int argc, char* argv[]) {
     // ---- 订阅者队列 + 注册 ----
     BlockingQueue<MsgPtr> ws_q(8192);
     BlockingQueue<MsgPtr> alarm_q(1024);
+    BlockingQueue<MsgPtr> net_q(4096);
     auto h_ws    = bus.subscribe(Topic::Speed, &ws_q);
     auto h_alarm = bus.subscribe(Topic::Speed, &alarm_q);
+    auto h_net   = bus.subscribe(Topic::Speed, &net_q);
 
     bus.start();
+
+    // 网络上报：连到 mock server（如果有）
+    auto jsonFn = [](const DataPoint& d) {
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "{\"timestamp\":%llu,\"speed\":%.1f,\"temp\":%.1f}",
+            (unsigned long long)d.timestamp.ms, d.speed, d.temp);
+        return std::string(buf);
+    };
+    NetReporter<DataPoint> reporter(net_q, "127.0.0.1", 9000, jsonFn);
+    reporter.start();
 
     // ---- uWS 初始化 ----
     struct PerSocketData {};
@@ -238,6 +252,7 @@ int main(int argc, char* argv[]) {
 
     // ---- 停机顺序：先停数据源 → 停总线 → 停订阅者 → 停 consumer ----
     running.store(false);
+    reporter.stop();
     ws_q.stop();
     alarm_q.stop();
     dataThread.join();
