@@ -119,10 +119,10 @@ docker run --rm -p 8080:8080 vehicle-dashboard
 |------|------|
 | SPSC 队列（1P1C） | 7.46 M items/sec |
 | MPMC 队列（1P1C） | 5.27 M items/sec |
-| MPMC 队列（4P4C，800 万条） | 10.88 M items/sec，零丢失 |
+| MPMC 队列（4P4C，800 万条） | 10.88 M items/sec，`pushed == consumed == 8,000,000` |
 | CAN 链路 | ~550 条/秒 |
 | HTTP `/api/history`（wrk -t2 -c100 -d15s） | 3410 QPS，P50 28.4ms，P99 52.2ms，0 错误 |
-| WebSocket（500 并发 / 30s） | 9858 msg/s，P50 159.8ms，P99 377.3ms，零丢包 |
+| WebSocket（500 并发 / 30s） | 9858 msg/s，P50 159.8ms，P99 377.3ms，无连接异常 |
 | 长稳 | 1000Hz 内部源连续运行，累计 603 万条无中断 |
 
 HTTP 压测原始输出：
@@ -168,7 +168,7 @@ python3 tests/mock_server.py 9000
 # 终端 2、3：CAN 生产者 + dashboard（同上）
 ```
 
-mock server 持续收到 JSON，速率与 CAN 帧同步（约 550 行/秒）：
+mock server 以 20Hz 采样收到 JSON（NetReporter 每 50ms 发一条，不推全量原始帧）：
 
 ```
 {"timestamp":1789268652086,"speed":59.3,"temp":74.1}

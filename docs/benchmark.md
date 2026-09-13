@@ -27,7 +27,7 @@
 - 吞吐随并发**近线性**：各档均达理论值（20Hz × 连接数）的 94% 以上
 - 200 并发内 P99 < 60ms，延迟随并发线性增长——单线程事件循环的固有成本
 - 500 并发（≈10k msg/s）为当前配置的**发送饱和点**：消息进入稳定排队，
-  30s 长跑证实延迟收敛（P99 1083ms→377ms）、队列不发散、零丢包
+  30s 长跑证实延迟收敛（P99 1083ms→377ms）、队列不发散、无连接异常
 - WS 延迟含客户端（单进程 Python asyncio）自身开销，为保守估计
 
 ## 架构对比：HTTP 轮询 vs WebSocket 推送
@@ -48,7 +48,7 @@
 |---------|------|------|------|
 | SPSC RingBuffer | 1P1C | 7.46 M items/sec | 基线，不支持多生产者 |
 | MPMC (Vyukov) | 1P1C | 5.27 M items/sec | CAS 引入约 29% 单线程开销 |
-| MPMC (Vyukov) | 4P4C | **10.88 M items/sec** | 800 万条零丢失，耗时 0.74s |
+| MPMC (Vyukov) | 4P4C | **10.88 M items/sec** | `pushed == consumed == 8,000,000`，耗时 0.74s |
 
 要点：
 
@@ -108,13 +108,15 @@
     # 内核 ASLR 熵值与 TSan shadow memory 布局不兼容时，需禁用地址随机化
     setarch $(uname -m) -R ./test_ring
     setarch $(uname -m) -R ./test_topic_bus
+    setarch $(uname -m) -R ./test_data_pool
     setarch $(uname -m) -R ./bench_mpmc
 
 | 测试 | 结果 |
 |------|------|
 | test_ring（SPSC/MPMC 并发正确性） | 0 race |
 | test_topic_bus（多订阅者分发与句柄生命周期） | 0 race |
-| bench_mpmc（4P4C × 800 万条，零丢失） | 0 race |
+| bench_mpmc（4P4C × 800 万条，pushed == consumed） | 0 race |
+| test_data_pool（降采样与容量边界） | 0 race |
 
 结论：acquire/release 内存序配对、alignas(64) 缓存行隔离、deliver 锁内快照-锁外回调，均未见数据竞争报告。
 
