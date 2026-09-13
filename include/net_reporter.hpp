@@ -3,17 +3,18 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <netdb.h>
 #include <string>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <thread>
 #include <unistd.h>
-#include <condition_variable>
-#include <mutex>
+
 #include "blocking_queue.hpp"
 #include "logger.hpp"
 
@@ -39,7 +40,7 @@ public:
 
     void stop() {
         if (!running_.exchange(false)) return;
-        stop_cv_.notify_all();      // ← 立刻唤醒退避中的 reporter 线程
+        stop_cv_.notify_all();
         queue_.stop();
         if (thread_.joinable()) thread_.join();
     }
@@ -54,9 +55,7 @@ private:
         hints.ai_socktype = SOCK_STREAM;
         const std::string portStr = std::to_string(port_);
 
-        if (getaddrinfo(host_.c_str(), portStr.c_str(), &hints, &res) != 0) {
-            return -1;
-        }
+        if (getaddrinfo(host_.c_str(), portStr.c_str(), &hints, &res) != 0) return -1;
         int fd = -1;
         for (auto* p = res; p != nullptr; p = p->ai_next) {
             fd = ::socket(p->ai_family, p->ai_socktype, p->ai_protocol);
@@ -69,6 +68,23 @@ private:
         return fd;
     }
 
+    // 退避等待：每 50ms 醒一次，响应 stop 并抽干队列，避免堆积
+    void backoffWaitAndDrain(int backoff_ms) {
+        auto end = std::chrono::steady_clock::now()
+                 + std::chrono::milliseconds(backoff_ms);
+        while (running_.load(std::memory_order_relaxed)
+               && std::chrono::steady_clock::now() < end) {
+            {
+                std::unique_lock<std::mutex> lk(stop_mtx_);
+                stop_cv_.wait_for(lk, std::chrono::milliseconds(50),
+                                  [this]{ return !running_.load(); });
+            }
+            if (!running_.load()) break;
+            MsgPtr dummy;
+            while (queue_.try_consume(dummy)) {}
+        }
+    }
+
     void run() {
         int backoff_ms = 1000;
         constexpr int kMaxBackoffMs = 30000;
@@ -78,27 +94,26 @@ private:
             if (fd < 0) {
                 LOG_WARN("[net] connect " + host_ + ":" + std::to_string(port_)
                      + " failed, retry in " + std::to_string(backoff_ms) + "ms");
-                std::unique_lock<std::mutex> lk(stop_mtx_);
-                stop_cv_.wait_for(lk, std::chrono::milliseconds(backoff_ms),
-                                    [this]{ return !running_.load(); });
-                if (!running_.load()) break;    // 被 stop 唤醒，直接退出
+
+                backoffWaitAndDrain(backoff_ms);
+                if (!running_.load()) break;
                 backoff_ms = std::min(backoff_ms * 2, kMaxBackoffMs);
                 reconnects_.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
 
             LOG_INFO("[net] connected to " + host_ + ":" + std::to_string(port_));
-            backoff_ms = 1000;   // 连上了，重置退避
+            backoff_ms = 1000;
 
             MsgPtr msg;
             bool send_failed = false;
             auto next_send = std::chrono::steady_clock::now();
-            while (running_.load(std::memory_order_relaxed)) {
-                if (!queue_.consume_blocking(msg, 1000)) continue;   // 超时无数据
 
-                // 20Hz 节流：上报是采样语义，不推全量原始帧
+            while (running_.load(std::memory_order_relaxed)) {
+                if (!queue_.consume_blocking(msg, 1000)) continue;
+
                 auto now = std::chrono::steady_clock::now();
-                if (now < next_send) continue;   // 丢弃这条
+                if (now < next_send) continue;
                 next_send = now + std::chrono::milliseconds(50);
 
                 std::string line = toJson_(*msg) + "\n";
@@ -112,9 +127,7 @@ private:
             }
             ::close(fd);
             if (send_failed) {
-                std::unique_lock<std::mutex> lk(stop_mtx_);
-                stop_cv_.wait_for(lk, std::chrono::milliseconds(backoff_ms),
-                                  [this]{ return !running_.load(); });
+                backoffWaitAndDrain(backoff_ms);
                 if (!running_.load()) break;
                 backoff_ms = std::min(backoff_ms * 2, kMaxBackoffMs);
                 reconnects_.fetch_add(1, std::memory_order_relaxed);

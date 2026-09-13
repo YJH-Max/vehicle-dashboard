@@ -221,9 +221,11 @@ int main(int argc, char* argv[]) {
             if (std::chrono::duration<double>(now - last_report).count() >= 1.0) {
                 last_report = now;
                 const auto total = pool.totalConsumed();
-                std::printf("[吞吐量] %llu 条/秒 | 累计 %llu 条 | WS推送 20Hz\n",
+                std::printf("[吞吐量] %llu 条/秒 | 累计 %llu 条 | dispatched %llu dropped %llu\n",
                             (unsigned long long)(total - last_total),
-                            (unsigned long long)total);
+                            (unsigned long long)total,
+                            (unsigned long long)bus.dispatched(),
+                            (unsigned long long)bus.dropped());
                 std::fflush(stdout);
                 last_total = total;
             }
@@ -305,10 +307,11 @@ int main(int argc, char* argv[]) {
 
     // 停机顺序：先停数据源, 停总线, 停订阅者, 停 consumer
     running.store(false);
+    dataThread.join();                                   // 先停数据源，不再 publish
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));  // 等管道排空
     reporter.stop();
     ws_q.stop();
     alarm_q.stop();
-    dataThread.join();
     bus.stop();
     ws_consumer.join();
     alarm_consumer.join();

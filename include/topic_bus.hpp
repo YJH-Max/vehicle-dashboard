@@ -106,6 +106,7 @@ public:
         if (dispatch_thread_.joinable()) dispatch_thread_.join();
     }
 
+    std::uint64_t dropped() const noexcept { return dropped_.load(std::memory_order_relaxed); }
     std::uint64_t dispatched() const noexcept {
         return dispatched_.load(std::memory_order_relaxed);
     }
@@ -153,8 +154,9 @@ private:
         }
         // 锁外执行：不会死锁，回调可以再调用 subscribe/unsubscribe
         for (auto& e : qcopy) {
-            // 队列满则丢弃这一条（丢新保稳），不阻塞分发线程
-            e.queue->produce(env.msg);
+            if (!e.queue->produce(env.msg)) {
+                dropped_.fetch_add(1, std::memory_order_relaxed);
+            }
         }
         for (auto& e : ccopy) {
             e.cb(*env.msg);
@@ -171,6 +173,7 @@ private:
     std::thread       dispatch_thread_;
     std::atomic<bool> running_{false};
     std::atomic<std::uint64_t> dispatched_{0};
+    std::atomic<std::uint64_t> dropped_{0};
 };
 
 template <typename T>
