@@ -139,7 +139,7 @@ MPMC 单线程比 SPSC 慢 29% 是预期内的，CAS 比纯原子 load/store 贵
 
 **发布订阅**：数据源只调 `publish(Topic, 数据)`，不知道有多少订阅者。分发线程查 Topic 对应的订阅者列表，给每个订阅者的队列 push 一份。`deliver` 在锁内快照订阅者列表、锁外执行回调，避免持锁调回调死锁。
 
-**阻塞唤醒**：`BlockingQueue` 空闲时消费者用 `condition_variable` 挂起，不占 CPU；数据到即唤醒。替代 1ms 轮询后 dashboard 进程 CPU 从 15% 降到 10%。
+**阻塞唤醒**：`BlockingQueue` 空闲时消费者用 `condition_variable` 挂起，不占 CPU；数据到即唤醒。替代 1ms 轮询后，`top -bn1 -p $(pgrep dashboard)` 采 10 秒均值，dashboard 进程 CPU 从 ~15% 降到 ~10%。
 
 **内核态 CAN 过滤**：`CAN_RAW_FILTER` 只放行 0x101/0x102，其余报文不进用户态。
 
@@ -158,7 +158,7 @@ python3 tests/mock_server.py 9000
 # 终端 2、3：CAN 生产者 + dashboard（同上）
 ```
 
-mock server 每 50ms 收到一行 JSON：
+mock server 持续收到 JSON，速率与 CAN 帧同步（约 550 行/秒）：
 
 ```
 {"timestamp":1789268652086,"speed":59.3,"temp":74.1}

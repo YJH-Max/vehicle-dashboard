@@ -92,8 +92,14 @@ private:
 
             MsgPtr msg;
             bool send_failed = false;
+            auto next_send = std::chrono::steady_clock::now();
             while (running_.load(std::memory_order_relaxed)) {
                 if (!queue_.consume_blocking(msg, 1000)) continue;   // 超时无数据
+
+                // 20Hz 节流：上报是采样语义，不推全量原始帧
+                auto now = std::chrono::steady_clock::now();
+                if (now < next_send) continue;   // 丢弃这条
+                next_send = now + std::chrono::milliseconds(50);
 
                 std::string line = toJson_(*msg) + "\n";
                 ssize_t n = ::send(fd, line.data(), line.size(), MSG_NOSIGNAL);
