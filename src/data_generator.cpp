@@ -34,7 +34,7 @@ void dataGenerator(DataPool& pool,
         pool.produce(d);
 
         // 实时总线：所有订阅者从这里拿数据
-        bus.publish(Topic::Speed, std::make_shared<DataPoint>(d));
+        bus.publish(Topic::Telemetry, std::make_shared<DataPoint>(d));
 
         t += dt;
         next_tick += std::chrono::duration_cast<std::chrono::steady_clock::duration>(

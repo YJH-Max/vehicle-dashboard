@@ -116,7 +116,7 @@ static bool canSourceThread(DataPool& pool,
         DataPoint d{Timestamp::now(), lastSpeed, lastTemp};
 
         pool.produce(d);
-        bus.publish(Topic::Speed, std::make_shared<DataPoint>(d));
+        bus.publish(Topic::Telemetry, std::make_shared<DataPoint>(d));
     }
     close(s);
     return true;
@@ -143,9 +143,9 @@ int main(int argc, char* argv[]) {
     BlockingQueue<MsgPtr> ws_q(8192);
     BlockingQueue<MsgPtr> alarm_q(1024);
     BlockingQueue<MsgPtr> net_q(4096);
-    auto h_ws    = bus.subscribe(Topic::Speed, &ws_q);
-    auto h_alarm = bus.subscribe(Topic::Speed, &alarm_q);
-    auto h_net   = bus.subscribe(Topic::Speed, &net_q);
+    auto h_ws    = bus.subscribe(Topic::Telemetry, &ws_q);
+    auto h_alarm = bus.subscribe(Topic::Telemetry, &alarm_q);
+    auto h_net   = bus.subscribe(Topic::Telemetry, &net_q);
 
     bus.start();
 

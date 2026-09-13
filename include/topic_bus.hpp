@@ -12,15 +12,13 @@
 #include "blocking_queue.hpp"
 
 enum class Topic : std::uint8_t {
-    Speed,
-    Temp,
-    Alarm,
+    Telemetry,   // 遥测数据流：车速 + 温度组合快照
+    Alarm,       // 告警事件（预留）
 };
 
 inline const char* topicName(Topic t) {
     switch (t) {
-        case Topic::Speed: return "Speed";
-        case Topic::Temp:  return "Temp";
+        case Topic::Telemetry: return "Telemetry";
         case Topic::Alarm: return "Alarm";
     }
     return "Unknown";
