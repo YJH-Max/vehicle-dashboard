@@ -25,10 +25,10 @@ public:
     DataPool(size_t ring_capacity = 4096, size_t history_cap = 100)
         : ring_(ring_capacity), history_cap_(history_cap) {}
 
-    // ---- 生产侧（generator 线程独占）----
+    // 生产侧（generator 线程独占）
     bool produce(const DataPoint& d) { return ring_.produce(d); }
 
-    // ---- 消费侧（consumer 线程独占）：把环形缓冲区抽干一次 ----
+    // 消费侧（consumer 线程独占）：把环形缓冲区抽干一次
     // 返回本次消费的条数
     size_t drain() {
         DataPoint d, last{};
@@ -36,7 +36,7 @@ public:
         while (ring_.consume(d)) {
             ++n;
             last = d;
-            // 降采样：每 100ms 数据时间取一个显示点 → 曲线每秒 10 个点
+            // 降采样：每 100ms 数据时间取一个显示点, 曲线每秒 10 个点
             if (d.timestamp.ms - last_sample_ts_.ms >= kSampleIntervalMs) {
                 last_sample_ts_ = d.timestamp;
                 std::lock_guard<std::mutex> lk(mtx_);
@@ -54,7 +54,7 @@ public:
         return n;
     }
 
-    // ---- 读侧（HTTP 线程）----
+    // 读侧（HTTP 线程）
     Snapshot snapshot() const {
         std::lock_guard<std::mutex> lk(mtx_);
         return Snapshot{latest_, {history_.begin(), history_.end()}};
@@ -65,7 +65,7 @@ public:
     }
 
 private:
-    // 无锁区：高频数据面（生产者 → 消费者）
+    // 无锁区：高频数据面（生产者, 消费者）
     MpmcQueue<DataPoint> ring_{4096};
 
     // 加锁区：低频显示面（消费者写，HTTP 读）

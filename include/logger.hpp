@@ -141,7 +141,7 @@ private:
     LogLevel         min_level_{LogLevel::DEBUG};
 };
 
-// ---------- 宏：调用方只需 LOG_INFO("...") ----------
+// 宏：调用方只需 LOG_INFO("...")
 #define LOG_DEBUG(msg) ::Logger::instance().log(LogLevel::DEBUG, (msg))
 #define LOG_INFO(msg)  ::Logger::instance().log(LogLevel::INFO,  (msg))
 #define LOG_WARN(msg)  ::Logger::instance().log(LogLevel::WARN,  (msg))

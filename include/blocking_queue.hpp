@@ -5,12 +5,8 @@
 
 #include "mpmc_queue.hpp"
 
-// BlockingQueue: 为 MPMC 无锁队列提供阻塞唤醒能力
-// 分层设计:
-//   - 数据路径: 底层 MpmcQueue 的 produce/consume 仍是无锁 CAS
-//   - 等待路径: 队列空时消费者挂起在 condition_variable 上，真正 0 CPU
-// 取舍说明: consume 在持锁状态下执行，避免 lost wakeup 竞态；
-//   消费操作纳秒级，持锁时间极短，对多消费者串行化的影响可忽略。
+// MpmcQueue 的阻塞包装。数据路径仍走无锁 CAS，等待路径用 condition_variable；
+// consume 在持锁状态下做，避免 lost wakeup——纳秒级操作，对几个消费者的影响可忽略。
 template <typename T>
 class BlockingQueue {
 public:
@@ -33,8 +29,8 @@ public:
     }
 
     // 阻塞消费:
-    //   timeout_ms < 0  → 无限等待 (直到有数据或 stop)
-    //   timeout_ms >= 0 → 最多等 timeout_ms 毫秒
+    //   timeout_ms < 0  : 无限等待 (直到有数据或 stop)
+    //   timeout_ms >= 0 : 最多等 timeout_ms 毫秒
     // 返回 false 表示 stop 或超时
     bool consume_blocking(T& out, int timeout_ms = -1) {
         std::unique_lock<std::mutex> lk(mtx_);
