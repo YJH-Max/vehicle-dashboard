@@ -82,6 +82,26 @@
 - **线程安全广播**：uWS 非线程安全，工作线程通过 loop->defer() 把 publish 投递回事件循环线程
 - **数据源可插拔**：DataPool 为唯一契约，CAN / 模拟双后端，前端零改动——架构解耦的实测验证
 
+
+## 网络上报（TCP）
+
+数据除推送浏览器外，同时上报远端 TCP 服务器。
+
+    # 终端 1: mock 服务器
+    python3 tests/mock_server.py 9000
+
+    # 终端 2: CAN 生产者
+    ./scripts/setup_vcan.sh && ./build/can_producer
+
+    # 终端 3: dashboard
+    ./build/dashboard --can vcan0
+
+mock server 每 50ms 收到一行 JSON：
+
+    {"timestamp":1789268652086,"speed":59.3,"temp":74.1}
+
+**断线重连**：连接失败按 1s→2s→4s→8s→16s→30s 指数退避；连接中断由 `send()` 返回的 `EPIPE/ECONNRESET` 检测。
+
 ## 目录结构
 
     ├── src/main.cpp            # 服务端：数据源分流 + REST + WS
