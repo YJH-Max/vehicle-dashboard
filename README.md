@@ -1,5 +1,7 @@
 # 🚗 车载实时数据监控仪表盘（C++ / SocketCAN / WebSocket）
 
+![CI](https://github.com/YJH-Max/vehicle-dashboard/actions/workflows/ci.yml/badge.svg)
+
 从内核 CAN 总线到浏览器曲线的完整实时链路：**SocketCAN 收帧 → 无锁 SPSC 队列 → uWebSockets 推送 → ECharts 可视化**。
 
 
