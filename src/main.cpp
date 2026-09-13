@@ -20,18 +20,22 @@
 
 #include <App.h>
 #include "json.hpp"
-
+#include <pthread.h> 
+#include <sched.h>
 #include "data_pool.hpp"
 #include "data_generator.hpp"
 #include "topic_bus.hpp"
 #include "blocking_queue.hpp"
 #include "logger.hpp"
 #include "net_reporter.hpp"
+#include <csignal>
 
+static std::atomic<bool> g_should_stop{false};
+static void onSignal(int) { g_should_stop.store(true); }
 using json = nlohmann::json;
 using MsgPtr = TopicBus<DataPoint>::MessagePtr;
 
-// ---------------- 基准模式（不变） ----------------
+// 基准模式（不变）
 static int runBench1P1C() {
     DataPool pool;
     std::atomic<bool> running{true};
@@ -73,7 +77,7 @@ static json snapJson(const DataPoint& d) {
             {"temp", d.temp}};
 }
 
-// ---------------- CAN 源线程 ----------------
+// CAN 源线程
 static bool canSourceThread(DataPool& pool,
                             TopicBus<DataPoint>& bus,
                             const char* iface,
@@ -123,6 +127,8 @@ static bool canSourceThread(DataPool& pool,
 }
 
 int main(int argc, char* argv[]) {
+    std::signal(SIGINT,  onSignal);
+    std::signal(SIGTERM, onSignal);
     if (argc > 1 && std::string(argv[1]) == "--bench") return runBench1P1C();
     Logger::instance().init("vehicle.log", LogLevel::INFO);
     LOG_INFO("=== dashboard starting ===");
@@ -130,7 +136,7 @@ int main(int argc, char* argv[]) {
     TopicBus<DataPoint> bus;
     std::atomic<bool> running{true};
 
-    // ---- 数据源分流 ----
+    // 数据源分流
     std::thread dataThread([&] {
         if (argc > 2 && std::string(argv[1]) == "--can") {
             if (canSourceThread(pool, bus, argv[2], running)) return;
@@ -139,7 +145,7 @@ int main(int argc, char* argv[]) {
         dataGenerator(pool, bus, 1000, running);
     });
 
-    // ---- 订阅者队列 + 注册 ----
+    // 订阅者队列 + 注册
     BlockingQueue<MsgPtr> ws_q(8192);
     BlockingQueue<MsgPtr> alarm_q(1024);
     BlockingQueue<MsgPtr> net_q(4096);
@@ -160,7 +166,7 @@ int main(int argc, char* argv[]) {
     NetReporter<DataPoint> reporter(net_q, "127.0.0.1", 9000, jsonFn);
     reporter.start();
 
-    // ---- uWS 初始化 ----
+    // uWS 初始化
     struct PerSocketData {};
     uWS::App app;
     uWS::Loop* loop = uWS::Loop::get();
@@ -189,7 +195,7 @@ int main(int argc, char* argv[]) {
         .close       = [](auto*, int, std::string_view) {}
     });
 
-    // ---- 原 consumer：只做 pool 整理 + 打印（不再广播）----
+    // 原 consumer：只做 pool 整理 + 打印（不再广播）
     std::thread consumer([&] {
         auto last_report = std::chrono::steady_clock::now();
         std::uint64_t last_total = 0;
@@ -209,7 +215,7 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    // ---- 新增 ws_consumer：订阅者 → 20Hz 合并快照 → uWS 广播 ----
+    // 新增 ws_consumer：订阅者, 20Hz 合并快照, uWS 广播
     std::thread ws_consumer([&] {
         MsgPtr msg;
         DataPoint snapshot{};
@@ -231,7 +237,7 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    // ---- 新增 alarm_consumer：订阅者 → 实时判断告警 ----
+    // 新增 alarm_consumer：订阅者, 实时判断告警
     std::thread alarm_consumer([&] {
         MsgPtr msg;
         while (running.load(std::memory_order_relaxed)) {
@@ -248,9 +254,29 @@ int main(int argc, char* argv[]) {
         else { std::cerr << "8080 被占用，先 pkill dashboard\n"; std::exit(1); }
     });
 
-    app.run();
+// 后台线程监听信号，一旦收到就停事件循环
+    std::thread signal_watcher([&] {
+        // 提高调度优先级，避免被忙等线程饿死
+        sched_param sp{};
+        sp.sched_priority = 50;
+        pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+        while (!g_should_stop.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        LOG_INFO("received SIGINT/SIGTERM, exiting...");
 
-    // ---- 停机顺序：先停数据源 → 停总线 → 停订阅者 → 停 consumer ----
+    // 手动清理，不依赖 app.run() 返回（它不会返回）
+        reporter.stop();
+        Logger::instance().shutdown();
+
+        // 强制退出。app.run() 会在这里被终止
+        std::exit(0);
+    });
+    signal_watcher.detach();   // 让它自己跑，不需要 join
+
+    app.run();   // 正常情况永远不会返回
+
+    // 停机顺序：先停数据源, 停总线, 停订阅者, 停 consumer
     running.store(false);
     reporter.stop();
     ws_q.stop();

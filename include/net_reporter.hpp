@@ -12,7 +12,8 @@
 #include <sys/types.h>
 #include <thread>
 #include <unistd.h>
-
+#include <condition_variable>
+#include <mutex>
 #include "blocking_queue.hpp"
 #include "logger.hpp"
 
@@ -38,6 +39,7 @@ public:
 
     void stop() {
         if (!running_.exchange(false)) return;
+        stop_cv_.notify_all();      // ← 立刻唤醒退避中的 reporter 线程
         queue_.stop();
         if (thread_.joinable()) thread_.join();
     }
@@ -75,8 +77,11 @@ private:
             int fd = connectToRemote();
             if (fd < 0) {
                 LOG_WARN("[net] connect " + host_ + ":" + std::to_string(port_)
-                         + " failed, retry in " + std::to_string(backoff_ms) + "ms");
-                std::this_thread::sleep_for(std::chrono::milliseconds(backoff_ms));
+                     + " failed, retry in " + std::to_string(backoff_ms) + "ms");
+                std::unique_lock<std::mutex> lk(stop_mtx_);
+                stop_cv_.wait_for(lk, std::chrono::milliseconds(backoff_ms),
+                                    [this]{ return !running_.load(); });
+                if (!running_.load()) break;    // 被 stop 唤醒，直接退出
                 backoff_ms = std::min(backoff_ms * 2, kMaxBackoffMs);
                 reconnects_.fetch_add(1, std::memory_order_relaxed);
                 continue;
@@ -101,7 +106,10 @@ private:
             }
             ::close(fd);
             if (send_failed) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(backoff_ms));
+                std::unique_lock<std::mutex> lk(stop_mtx_);
+                stop_cv_.wait_for(lk, std::chrono::milliseconds(backoff_ms),
+                                  [this]{ return !running_.load(); });
+                if (!running_.load()) break;
                 backoff_ms = std::min(backoff_ms * 2, kMaxBackoffMs);
                 reconnects_.fetch_add(1, std::memory_order_relaxed);
             }
@@ -113,7 +121,8 @@ private:
     std::string host_;
     int port_;
     std::string (*toJson_)(const T&);
-
+    std::mutex              stop_mtx_;
+    std::condition_variable stop_cv_;
     std::thread       thread_;
     std::atomic<bool> running_{false};
     std::atomic<std::uint64_t> sent_{0};
