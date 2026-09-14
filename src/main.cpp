@@ -28,6 +28,7 @@
 #include "blocking_queue.hpp"
 #include "logger.hpp"
 #include "net_reporter.hpp"
+#include "shm_ring.hpp"
 #include <csignal>
 
 static std::atomic<bool> g_should_stop{false};
@@ -131,6 +132,60 @@ static bool canSourceThread(DataPool& pool,
     return true;
 }
 
+// ================ 共享内存数据源 ================
+// 从 shm_ring 打开共享内存队列，循环 pop → pool + bus
+// 返回 true = 正常运行过；false = shm 不存在或打开失败（调用方回退）
+static bool shmSourceThread(DataPool& pool,
+                            TopicBus<DataPoint>& bus,
+                            const char* name,
+                            std::atomic<bool>& running) {
+    using ShmRing = shmring::ShmRing<shmring::DataPoint>;
+    ShmRing* ring = nullptr;
+    // 重试 5 秒，等 can_reader 创建 shm
+    for (int i = 0; i < 50 && !ring; ++i) {
+        ring = ShmRing::open(name);
+        if (!ring) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    if (!ring) {
+        std::fprintf(stderr, "[shm] 无法打开 %s（can_reader 是否在跑？）\n", name);
+        return false;
+    }
+    std::printf("[shm] 数据源: %s\n", name);
+    std::fflush(stdout);
+
+    std::uint64_t total = 0;
+    std::uint64_t last_total = 0;
+    auto last_report = std::chrono::steady_clock::now();
+
+    while (running.load(std::memory_order_relaxed)) {
+        shmring::DataPoint sd{};
+        if (ring->pop(sd)) {
+            DataPoint d;
+            d.timestamp = Timestamp{ sd.timestamp_ms };
+            d.speed = sd.speed;
+            d.temp  = sd.temp;
+
+            pool.produce(d);
+            bus.publish(Topic::Telemetry, std::make_shared<DataPoint>(d));
+            ++total;
+        } else {
+            std::this_thread::yield();
+        }
+
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration<double>(now - last_report).count() >= 1.0) {
+            last_report = now;
+            std::printf("[shm] %llu 条/秒 | 累计 %llu 条\n",
+                        (unsigned long long)(total - last_total),
+                        (unsigned long long)total);
+            std::fflush(stdout);
+            last_total = total;
+        }
+    }
+    ring->close();
+    return true;
+}
+
 int main(int argc, char* argv[]) {
     std::signal(SIGINT,  onSignal);
     std::signal(SIGTERM, onSignal);
@@ -152,6 +207,9 @@ int main(int argc, char* argv[]) {
         if (argc > 2 && std::string(argv[1]) == "--can") {
             if (canSourceThread(pool, bus, argv[2], running)) return;
             LOG_WARN("[can] 启动失败，自动回退到内部模拟源");
+        } else if (argc > 1 && std::string(argv[1]) == "--shm") {
+            if (shmSourceThread(pool, bus, "/vehicle_dashboard_ring", running)) return;
+            LOG_WARN("[shm] 启动失败，自动回退到内部模拟源");
         }
         dataGenerator(pool, bus, 1000, running);
     });

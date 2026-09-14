@@ -36,3 +36,12 @@ add_test(NAME data_pool_test COMMAND test_data_pool)
 
 add_executable(bench_mutex_vs tests/bench_mutex_vs_lockfree.cpp)
 target_link_libraries(bench_mutex_vs pthread)
+
+add_executable(shm_writer src/shm_writer.cpp)
+target_link_libraries(shm_writer pthread)
+
+add_executable(shm_reader src/shm_reader.cpp)
+target_link_libraries(shm_reader pthread)
+
+add_executable(can_reader src/can_reader.cpp)
+target_link_libraries(can_reader pthread)
