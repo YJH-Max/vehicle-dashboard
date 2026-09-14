@@ -27,7 +27,7 @@
 #include "topic_bus.hpp"
 #include "blocking_queue.hpp"
 #include "logger.hpp"
-#include "net_reporter.hpp"
+#include "epoll_reporter.hpp"
 #include "shm_ring.hpp"
 #include <csignal>
 
@@ -232,7 +232,7 @@ int main(int argc, char* argv[]) {
             (unsigned long long)d.timestamp.ms, d.speed, d.temp);
         return std::string(buf);
     };
-    NetReporter<DataPoint> reporter(net_q, "127.0.0.1", 9000, jsonFn);
+    EpollReporter<DataPoint> reporter(net_q, "127.0.0.1", 9000, jsonFn);
     reporter.start();
 
     // uWS 初始化
