@@ -45,3 +45,6 @@ target_link_libraries(shm_reader pthread)
 
 add_executable(can_reader src/can_reader.cpp)
 target_link_libraries(can_reader pthread)
+
+add_executable(test_epoll_reporter tests/test_epoll_reporter.cpp)
+target_link_libraries(test_epoll_reporter pthread)
