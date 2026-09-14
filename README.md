@@ -10,26 +10,37 @@
 
 ## 数据流
 
-```
-can_producer
-    |  550 帧/秒（0x101 每 2ms，0x102 每 20ms）
-    v
-vcan0  (SocketCAN 内核)
-    |  PF_CAN RAW + CAN_RAW_FILTER
-    v
-can_source_thread   0x101 / 0x102 各持最新值 -> 合成一条 DataPoint
-    |
-    +--> DataPool --------------------------> GET /api/history（冷启动回填）
-    |         1ms drain + 降采样
-    |
-    +--> TopicBus.publish(Topic::Telemetry)
-              |  独立分发线程，每个订阅者一条私有 BlockingQueue
-              +--> ws_q    (8192) --> 20Hz 合并 + loop->defer() --> uWS publish --> 浏览器
-              +--> alarm_q (1024) --> 车速 > 阈值（默认 130） --> LOG_WARN
-              +--> net_q   (4096) --> NetReporter --> TCP 9000（指数退避重连）
-```
+数据源三选一，取决于启动参数：
+
+    默认            内部模拟源 (1000Hz)
+    --can vcan0     can_producer → vcan0 → canSourceThread（同进程）
+    --shm           can_producer → vcan0 → can_reader（独立进程）→ 共享内存队列 → shmSourceThread
+
+三条路后续处理链路一致：
+
+    canSourceThread / shmSourceThread / 内部模拟源
+        |
+        +--> DataPool --------------------------> GET /api/history（冷启动回填）
+        |         1ms drain + 降采样
+        |
+        +--> TopicBus.publish(Topic::Telemetry)
+                  |  独立分发线程，每个订阅者一条私有 BlockingQueue
+                  +--> ws_q    (8192) --> 20Hz 合并 + loop->defer() --> uWS publish --> 浏览器
+                  +--> alarm_q (1024) --> 车速 > 阈值（默认 130） --> LOG_WARN
+                  +--> net_q   (4096) --> NetReporter --> TCP 9000（指数退避重连）
 
 Logger 是第四个消费端：各线程只把日志字符串塞进无锁队列，落盘由独立线程完成。
+
+--shm 模式下，数据源与数据处理拆分为两个独立进程，通过共享内存 IPC 通信：
+
+    can_producer ──→ vcan0 ──→ [can_reader 进程]
+                                      │ push（Vyukov 无锁）
+                                      ▼
+                          /dev/shm/vehicle_dashboard_ring
+                          （定长 POD，8192 槽，跨进程共享）
+                                      │ pop
+                                      ▼
+                                [dashboard 进程]
 
 ## 核心组件
 
@@ -41,32 +52,53 @@ Logger 是第四个消费端：各线程只把日志字符串塞进无锁队列�
 | `DataPool` | 历史数据池 + 降采样，供 `/api/history` 冷启动 |
 | `Logger` | 异步日志，入队方纳秒级返回 |
 | `NetReporter` | TCP 上报，指数退避重连 |
+| `ShmRing` | 跨进程 Vyukov 队列，共享内存 + 定长 POD（`--shm` 模式用） |
 
 ## 快速开始
 
-```bash
-# 依赖（Ubuntu 24.04）
-./scripts/install_deps.sh
+依赖装一次，编译一次：
 
-# 编译（一次性）
-./scripts/install_deps.sh
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
+    ./scripts/install_deps.sh
+    cmake -B build -DCMAKE_BUILD_TYPE=Release
+    cmake --build build -j$(nproc)
 
-# 终端 1：虚拟 CAN 总线 + 模拟 ECU
-./scripts/setup_vcan.sh
-./build/can_producer
+三种数据源模式，任选其一：
 
-# 终端 2：启动服务
-./build/dashboard --can vcan0
+### 模式 A：内部模拟源（零配置）
 
-# 浏览器打开 http://localhost:8080
-```
+    ./build/dashboard
 
-不带参数启动时使用内部模拟源（1000Hz）；`--can` 指定的总线起不来会自动回退。`./build/dashboard --bench` 跑队列基准。
+### 模式 B：--can 直读 vcan0（同进程）
 
-告警阈值可配：`./build/dashboard --can vcan0 --alarm-threshold 100`（默认 130 km/h）。
-生产者注入超速用于验证告警链路：`./build/can_producer vcan0 500 --inject-over 145`（每 5 秒注入 1 秒超速）。
+    # 终端 1
+    ./scripts/setup_vcan.sh
+    ./build/can_producer
+
+    # 终端 2
+    ./build/dashboard --can vcan0
+
+### 模式 C：--shm 三进程（跨进程共享内存）
+
+    # 终端 1：CAN 帧生产者
+    ./scripts/setup_vcan.sh
+    ./build/can_producer
+
+    # 终端 2：独立收帧进程，写入共享内存
+    ./build/can_reader
+
+    # 终端 3：数据处理 + 可视化
+    ./build/dashboard --shm
+
+浏览器打开 http://localhost:8080。
+
+参数说明：
+
+- 不带参数 → 内部模拟源 1000Hz，零配置兜底
+- `--can vcan0` → 同进程直读 vcan0
+- `--shm` → 从 /dev/shm/vehicle_dashboard_ring 读（需先启动 can_reader）
+- `--bench` → 队列基准测试
+- `--alarm-threshold N` → 告警阈值（默认 130 km/h）
+- can_producer 的 `--inject-over N` → 每 5 秒注入 1 秒超速，验证告警链路
 
 ## Docker
 
