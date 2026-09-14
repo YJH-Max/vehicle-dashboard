@@ -48,3 +48,4 @@ target_link_libraries(can_reader pthread)
 
 add_executable(test_epoll_reporter tests/test_epoll_reporter.cpp)
 target_link_libraries(test_epoll_reporter pthread)
+add_test(NAME epoll_reporter_test COMMAND test_epoll_reporter)

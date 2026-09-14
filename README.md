@@ -27,7 +27,7 @@
                   |  独立分发线程，每个订阅者一条私有 BlockingQueue
                   +--> ws_q    (8192) --> 20Hz 合并 + loop->defer() --> uWS publish --> 浏览器
                   +--> alarm_q (1024) --> 车速 > 阈值（默认 130） --> LOG_WARN
-                  +--> net_q   (4096) --> NetReporter --> TCP 9000（指数退避重连）
+                  +--> net_q   (4096) --> EpollReporter --> TCP 9000（非阻塞 epoll / 指数退避）
 
 Logger 是第四个消费端：各线程只把日志字符串塞进无锁队列，落盘由独立线程完成。
 
@@ -51,7 +51,8 @@ Logger 是第四个消费端：各线程只把日志字符串塞进无锁队列�
 | `TopicBus` | 发布订阅总线，独立分发线程，订阅者各持一条队列 |
 | `DataPool` | 历史数据池 + 降采样，供 `/api/history` 冷启动 |
 | `Logger` | 异步日志，入队方纳秒级返回 |
-| `NetReporter` | TCP 上报，指数退避重连 |
+| `NetReporter` | TCP 上报（阻塞 send 版，保留作对比） |
+| `EpollReporter` | TCP 上报（非阻塞 epoll + 用户态缓冲，当前主用） |
 | `ShmRing` | 跨进程 Vyukov 队列，共享内存 + 定长 POD（`--shm` 模式用） |
 
 ## 快速开始
@@ -200,13 +201,15 @@ python3 tests/mock_server.py 9000
 # 终端 2、3：CAN 生产者 + dashboard（同上）
 ```
 
-mock server 以 20Hz 采样收到 JSON（NetReporter 每 50ms 发一条，不推全量原始帧）：
+mock server 以 20Hz 采样收到 JSON（EpollReporter 每 50ms 发一条，不推全量原始帧）：
 
 ```
 {"timestamp":1789268652086,"speed":59.3,"temp":74.1}
 ```
 
-断线按 1s→2s→4s→8s→16s→30s 指数退避重连；连接中断由 `send()` 返回的 `EPIPE`/`ECONNRESET` 检测。
+`EpollReporter` 用非阻塞 socket（`SOCK_NONBLOCK`）+ epoll：连接阶段用 `EINPROGRESS` 异步建连，`send` 返回 `EAGAIN` 时数据留在用户态缓冲，等 `EPOLLOUT` 事件继续发；缓冲空时注销 `EPOLLOUT` 订阅，避免 busy loop。断线原因通过 `getsockopt(SO_ERROR)` 打印。
+
+断线按 1s→2s→4s→8s→16s→30s 指数退避重连；退避期仍持续抽干 `net_q`，避免队列堆积。
 
 ## 测试与 CI
 
@@ -228,7 +231,8 @@ cd build && ctest --output-on-failure
 │   ├── topic_bus.hpp        发布订阅总线
 │   ├── data_pool.hpp        历史数据池 / 降采样
 │   ├── logger.hpp           异步日志
-│   ├── net_reporter.hpp     TCP 上报（退避期抽干 / 20Hz 采样 / 指数重连）
+│   ├── net_reporter.hpp     TCP 上报（阻塞 send 版，保留作对比）
+│   ├── epoll_reporter.hpp   TCP 上报（非阻塞 epoll + 用户态缓冲）
 │   └── timestamp.hpp        强类型时间戳（毫秒）
 ├── src/
 │   ├── main.cpp             服务端：CAN 收帧 + TopicBus + REST + WS
@@ -262,11 +266,13 @@ cd build && ctest --output-on-failure
 
 **drop 计数暴露真实缺陷**：加 `dropped_` 计数器后测试发现每秒丢 550 条——根因是 `NetReporter` 退避期只在每次重连时抽干队列一次，30 秒退避期内队列持续堆积。改成退避期每 50ms 抽干一次后 dropped 全程 0。这个问题只有加了 drop 计数才暴露。
 
+**共享内存生命周期是 Demo 级**：`can_reader` 是无限循环，Ctrl-C 时不执行 `ring->close()`，`/dev/shm/vehicle_dashboard_ring` 可能残留；`create()` 遇到已有区域会直接打开，忽略新容量参数。生产级实现需要信号处理 + 原子 unlink + 容量校验。当前跨进程原子操作未检查 `is_always_lock_free`——x86-64 上 64 位原子必定 lock-free，但移植到其他架构时应显式验证。
+
 ## 已知局限
 
 **优雅停机是 Demo 级**：信号处理线程收到 SIGINT/SIGTERM 后调 `std::exit(0)`，uWS 主循环之后的清理路径不可达。uWS 的 `Loop` 未暴露 `stop()` 接口，正经关闭需要换库或改造 uWS，本项目未做。实际效果：Ctrl-C 后日志和网络连接能收尾（显式调用 `Logger::shutdown()` 和 `reporter.stop()`），但 uWS 内部的连接关闭不走正常路径。
 
-**NetReporter 是 20Hz 采样上报，不是全量可靠上报**：断线期间丢包按"丢新保稳"策略，不重传。这是车载遥测的常见取舍——实时性优先于完整性。
+**EpollReporter 是 20Hz 采样上报，不是全量可靠上报**：断线期间丢包按"丢新保稳"策略，不重传。这是车载遥测的常见取舍——实时性优先于完整性。
 
 **"无重复"未做严格验证**：MPMC 的 `pushed == consumed == 8,000,000` 证明"不丢"，但不排除"同时丢一条、重复一条"的极端情况。要严格验证需要加消息序号。TSan 的 0 race 只证明"无数据竞争"，不证明"每条消息恰好一次"。
 
