@@ -4,11 +4,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <linux/can.h>
 #include <linux/can/raw.h>
 #include <net/if.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -16,8 +18,16 @@
 constexpr const char* kShmName  = "/vehicle_dashboard_ring";
 constexpr std::size_t kCapacity = 8192;   // 越大越抗抖动
 
+// 信号处理：只设标志，不做其他事（信号上下文里不能做复杂操作）
+static std::atomic<bool> g_stop{false};
+static void onSignal(int) { g_stop.store(true); }
+
 int main(int argc, char** argv) {
     const char* iface = argc > 1 ? argv[1] : "vcan0";
+
+    // 注册信号处理——Ctrl-C 时设 g_stop，主循环检测后优雅退出
+    std::signal(SIGINT,  onSignal);
+    std::signal(SIGTERM, onSignal);
 
     // 1. 创建共享内存队列
     using Ring = shmring::ShmRing<shmring::DataPoint>;
@@ -57,7 +67,21 @@ int main(int argc, char** argv) {
     std::uint64_t written = 0, dropped = 0;
     auto last_report = std::chrono::steady_clock::now();
 
-    while (true) {
+    // poll 带 200ms 超时，让主循环能周期性检查 g_stop
+    pollfd pfd{};
+    pfd.fd     = s;
+    pfd.events = POLLIN;
+
+    while (!g_stop.load(std::memory_order_relaxed)) {
+        int pr = ::poll(&pfd, 1, 200);
+        if (pr < 0) {
+            if (errno == EINTR) continue;   // 被信号打断，回循环检查 g_stop
+            std::perror("[can_reader] poll");
+            break;
+        }
+        if (pr == 0) continue;              // 超时，回循环检查 g_stop
+        if (!(pfd.revents & POLLIN)) continue;
+
         ssize_t n = read(s, &f, sizeof(f));
         if (n < (ssize_t)sizeof(can_frame)) continue;
 
@@ -89,5 +113,13 @@ int main(int argc, char** argv) {
             std::fflush(stdout);
         }
     }
+
+    // 4. 优雅退出：关 socket、释放 shm
+    std::printf("\n[can_reader] 收到停止信号，清理中...\n");
+    ::close(s);
+    ring->close();       // munmap + shm_unlink
+    std::printf("[can_reader] 已退出，written=%llu dropped=%llu\n",
+                (unsigned long long)written,
+                (unsigned long long)dropped);
     return 0;
 }
