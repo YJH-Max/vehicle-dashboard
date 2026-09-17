@@ -42,6 +42,19 @@ Logger 是第四个消费端：各线程只把日志字符串塞进无锁队列�
                                       ▼
                                 [dashboard 进程]
 
+## 真实硬件验证
+
+链路：`can_producer → CANable2 USB-CAN → 物理 CAN 总线 → can0 → dashboard`
+
+接线：CAN_H ↔ CAN_H，CAN_L ↔ CAN_L，两端各 120Ω 终端电阻（单板自环时短接 CAN_H / CAN_L）。
+
+    sudo slcand -o -c -s8 /dev/ttyACM0 can0      # 1Mbps
+    sudo ip link set up can0
+    ./build/dashboard --can can0                 # 终端 1
+    ./build/can_producer can0 500                # 终端 2
+
+验证：`candump can0` 应看到 0x101 与 0x102 交替，比例约 10:1；dashboard 吞吐稳定在 550 条/秒（500Hz 车速 + 50Hz 水温），端到端延迟 20~30ms，`ws_q` / `alarm_q` 零丢包。
+
 ## 核心组件
 
 | 组件 | 作用 |
@@ -183,6 +196,8 @@ MPMC 单线程比 SPSC 慢 29% 是预期内的，CAS 比纯原子 load/store 贵
 **告警去抖**：`alarm_consumer` 加 1 秒冷却期，防止 500Hz 数据刷爆日志——真实车载告警系统都需要这层过滤。
 
 **drop 计数**：`TopicBus::deliver` 检查订阅者队列的 `produce` 返回值，累加 `dropped_`；每秒和 `dispatched` 一起打印，丢包不再静默。
+
+真实 CAN 场景下 `net_q` 的 `dropped` 会持续增长（约 530 条/秒）：`EpollReporter` 是 20Hz 采样上报，消费速度 20 条/秒，而 CAN 输入 550 条/秒，队列 7.7 秒填满后持续丢新保稳。这是采样上报的必然结果，不是缺陷——`ws_q` 和 `alarm_q` 不受影响。
 
 **内核态 CAN 过滤**：`CAN_RAW_FILTER` 只放行 0x101/0x102，其余报文不进用户态。
 
