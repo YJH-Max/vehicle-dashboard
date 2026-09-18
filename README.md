@@ -44,7 +44,11 @@ Logger 是第四个消费端：各线程只把日志字符串塞进无锁队列�
 
 ## 真实硬件验证
 
-链路：`can_producer → CANable2 USB-CAN → 物理 CAN 总线 → can0 → dashboard`
+链路：`can_producer(模拟 ECU) → CANable2 USB-CAN → 物理 CAN 总线 → can0 → dashboard`
+
+说明：数据源仍是模拟 ECU；CANable2 只负责物理层收发，验证的是 SocketCAN → 物理总线 → SocketCAN 这一段的链路正确性。
+
+固件说明：`slcand -o -c -s8 /dev/ttyACM0 can0` 适用于 **slcan 固件**。如果设备运行 gs_usb/candlelight 固件，通常直接以 can0 出现，不需要 slcand。
 
 接线：CAN_H ↔ CAN_H，CAN_L ↔ CAN_L，两端各 120Ω 终端电阻（单板自环时短接 CAN_H / CAN_L）。
 

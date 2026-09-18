@@ -78,8 +78,14 @@ private:
                 }
             }
 
-            // 从 net_q 抽一批数据到用户态发送缓冲
-            drainQueueToBuf();
+            // 20Hz 采样上报：每 50ms 只抽一批，避免 net_q 被瞬间抽干
+            {
+                auto now = std::chrono::steady_clock::now();
+                if (now >= next_sample_) {
+                    next_sample_ = now + std::chrono::milliseconds(50);
+                    drainQueueToBuf();
+                }
+            }
 
             // 有数据要发但还没订阅 EPOLLOUT → 改订阅
             if (!send_buf_.empty() && !want_write_) {
@@ -169,6 +175,7 @@ private:
             }
             connecting_ = false;
             backoff_ms = 1000;   // 连上了，重置退避
+            next_sample_ = std::chrono::steady_clock::now();
             LOG_INFO("[epoll] connected to " + host_ + ":" + std::to_string(port_));
         }
 
@@ -261,4 +268,5 @@ private:
     bool want_write_ = false;
     std::string send_buf_;
     std::chrono::steady_clock::time_point next_retry_;
+    std::chrono::steady_clock::time_point next_sample_;
 };

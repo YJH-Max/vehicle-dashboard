@@ -19,8 +19,8 @@ constexpr const char* kShmName  = "/vehicle_dashboard_ring";
 constexpr std::size_t kCapacity = 8192;   // 越大越抗抖动
 
 // 信号处理：只设标志，不做其他事（信号上下文里不能做复杂操作）
-static std::atomic<bool> g_stop{false};
-static void onSignal(int) { g_stop.store(true); }
+static volatile std::sig_atomic_t g_stop = 0;
+static void onSignal(int) { g_stop = 1; }
 
 int main(int argc, char** argv) {
     const char* iface = argc > 1 ? argv[1] : "vcan0";
@@ -40,20 +40,29 @@ int main(int argc, char** argv) {
                 kShmName, kCapacity);
 
     // 2. 打开 vcan0 raw socket
-    int s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
-    if (s < 0) { std::perror("[can_reader] socket"); return 1; }
+    int s = -1;
+    auto cleanup_on_fail = [&]() {
+        if (s >= 0) ::close(s);
+        ring->close();
+    };
+
+    s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+    if (s < 0) { std::perror("[can_reader] socket"); cleanup_on_fail(); return 1; }
 
     ifreq ifr{};
     std::strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
     if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) {
         std::fprintf(stderr, "[can_reader] 接口 %s 不存在\n", iface);
+        cleanup_on_fail();
         return 1;
     }
     sockaddr_can addr{};
     addr.can_family  = AF_CAN;
     addr.can_ifindex = ifr.ifr_ifindex;
     if (bind(s, (sockaddr*)&addr, sizeof(addr)) < 0) {
-        std::perror("[can_reader] bind"); return 1;
+        std::perror("[can_reader] bind");
+        cleanup_on_fail();
+        return 1;
     }
     can_filter filt[2] = {{0x101, CAN_SFF_MASK}, {0x102, CAN_SFF_MASK}};
     setsockopt(s, SOL_CAN_RAW, CAN_RAW_FILTER, filt, sizeof(filt));
@@ -72,18 +81,26 @@ int main(int argc, char** argv) {
     pfd.fd     = s;
     pfd.events = POLLIN;
 
-    while (!g_stop.load(std::memory_order_relaxed)) {
+    while (!g_stop) {
         int pr = ::poll(&pfd, 1, 200);
         if (pr < 0) {
             if (errno == EINTR) continue;   // 被信号打断，回循环检查 g_stop
             std::perror("[can_reader] poll");
             break;
         }
-        if (pr == 0) continue;              // 超时，回循环检查 g_stop
+        if (pr == 0) continue;
+
+        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            std::fprintf(stderr,
+                "[can_reader] CAN 接口异常 (revents=0x%x)，退出让上层重启\n",
+                pfd.revents);
+            break;
+        }
         if (!(pfd.revents & POLLIN)) continue;
 
         ssize_t n = read(s, &f, sizeof(f));
         if (n < (ssize_t)sizeof(can_frame)) continue;
+        if (f.can_dlc < 2) continue;
 
         std::uint16_t raw =
             (std::uint16_t)f.data[0] | (std::uint16_t(f.data[1]) << 8);

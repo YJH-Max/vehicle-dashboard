@@ -31,9 +31,9 @@
 #include "shm_ring.hpp"
 #include <csignal>
 
-static std::atomic<bool> g_should_stop{false};
+static volatile std::sig_atomic_t g_should_stop = 0;
 static double g_alarm_threshold = 130.0;
-static void onSignal(int) { g_should_stop.store(true); }
+static void onSignal(int) { g_should_stop = 1; }
 using json = nlohmann::json;
 using MsgPtr = TopicBus<DataPoint>::MessagePtr;
 
@@ -115,6 +115,7 @@ static bool canSourceThread(DataPool& pool,
     while (running.load(std::memory_order_relaxed)) {
         const ssize_t n = read(s, &f, sizeof(f));
         if (n < (ssize_t)sizeof(can_frame)) continue;
+        if (f.can_dlc < 2) continue;
 
         const std::uint16_t raw =
             (std::uint16_t)f.data[0] | (std::uint16_t(f.data[1]) << 8);
@@ -347,7 +348,7 @@ int main(int argc, char* argv[]) {
         sched_param sp{};
         sp.sched_priority = 50;
         pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
-        while (!g_should_stop.load()) {
+        while (!g_should_stop) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         LOG_INFO("received SIGINT/SIGTERM, exiting...");
