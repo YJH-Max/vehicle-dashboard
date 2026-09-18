@@ -31,9 +31,12 @@
 #include "shm_ring.hpp"
 #include <csignal>
 
-static volatile std::sig_atomic_t g_should_stop = 0;
+// 信号处理器里只能安全写 sig_atomic_t（async-signal-safe）
+static volatile std::sig_atomic_t g_signal_received = 0;
+// 跨线程通知用 atomic<bool>：signal_watcher 收到 sig_atomic_t 后转写这里
+static std::atomic<bool> g_should_stop{false};
 static double g_alarm_threshold = 130.0;
-static void onSignal(int) { g_should_stop = 1; }
+static void onSignal(int) { g_signal_received = 1; }
 using json = nlohmann::json;
 using MsgPtr = TopicBus<DataPoint>::MessagePtr;
 
@@ -348,7 +351,11 @@ int main(int argc, char* argv[]) {
         sched_param sp{};
         sp.sched_priority = 50;
         pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
-        while (!g_should_stop) {
+        while (!g_should_stop.load(std::memory_order_relaxed)) {
+            if (g_signal_received) {
+                g_should_stop.store(true, std::memory_order_relaxed);
+                break;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         LOG_INFO("received SIGINT/SIGTERM, exiting...");

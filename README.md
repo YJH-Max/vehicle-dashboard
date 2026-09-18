@@ -201,7 +201,7 @@ MPMC 单线程比 SPSC 慢 29% 是预期内的，CAS 比纯原子 load/store 贵
 
 **drop 计数**：`TopicBus::deliver` 检查订阅者队列的 `produce` 返回值，累加 `dropped_`；每秒和 `dispatched` 一起打印，丢包不再静默。
 
-真实 CAN 场景下 `net_q` 的 `dropped` 会持续增长（约 530 条/秒）：`EpollReporter` 是 20Hz 采样上报，消费速度 20 条/秒，而 CAN 输入 550 条/秒，队列 7.7 秒填满后持续丢新保稳。这是采样上报的必然结果，不是缺陷——`ws_q` 和 `alarm_q` 不受影响。
+`net_q` 的 `dropped` 会在 TCP 对端不可用、对端接收窗口耗尽、或用户态发送缓冲达到上限时增长。`EpollReporter` 每 50ms 抽取一批（每批最多 128 条）到用户态缓冲，随后尽快 `send`；当发送链路跟不上输入速率时，`net_q` 积压并触发丢新保稳。这是 TCP 背压的体现，不是采样策略导致的——`ws_q` 和 `alarm_q` 不受影响。
 
 **内核态 CAN 过滤**：`CAN_RAW_FILTER` 只放行 0x101/0x102，其余报文不进用户态。
 
